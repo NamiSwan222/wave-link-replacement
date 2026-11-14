@@ -86,12 +86,13 @@ public partial class MainWindow : Window
         ApplyEffects();
     }
 
-    void UpdateBoostLabel() => BoostValue.Text = BoostSlider.Value switch
+    void UpdateBoostLabel()
     {
-        0 => "off",
-        > 0 => $"+{BoostSlider.Value:0.#} dB",
-        _ => $"{BoostSlider.Value:0.#} dB",
-    };
+        var v = BoostSlider.Value;
+        BoostValue.Text = v switch { 0 => "off", > 0 => $"+{v:0.#} dB", _ => $"{v:0.#} dB" };
+        // Boost is applied in the audio engine after the input level; big boosts can clip.
+        BoostValue.Foreground = (System.Windows.Media.Brush)FindResource(v > 12 ? "Warn" : "Muted");
+    }
 
     void ApplyEffects()
     {

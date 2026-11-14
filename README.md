@@ -28,10 +28,10 @@ audio APIs.
 
 ## Features
 
-- **Mic:** pick the mic, input level, mute, live level meter
+- **Mic:** pick the mic, input level, mic boost (up to +24 dB, applied in the audio engine), mute, live level meter
 - **Effects:** AI noise removal and gate
   ([RNNoise VST](https://github.com/werman/noise-suppression-for-voice)), 80 Hz low cut,
-  voice tone presets (Flat, Warm, Clear, Broadcast, Radio), voice boost
+  voice tone presets (Flat, Warm, Clear, Broadcast, Radio)
 - **App mixer:** volume, mute and output device for each app playing sound
 - Tray icon (left click opens, right click for mute and quit), optional start with Windows
 - Warns when Wave Link is running or when the effects aren't attached to the mic correctly

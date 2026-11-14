@@ -55,13 +55,20 @@
                             </Border>
                         </Grid>
                     </Border>
-                    <TextBlock Text="Moves while an app (Discord, OBS…) is using the mic." FontSize="11.5" Foreground="{StaticResource Muted}" Margin="0,0,0,16"/>
+                    <TextBlock Text="Moves while an app (Discord, OBS…) is using the mic." TextWrapping="Wrap" FontSize="11.5" Foreground="{StaticResource Muted}" Margin="0,0,0,16"/>
 
-                    <DockPanel Margin="0,0,0,6">
+                    <DockPanel Margin="0,0,0,2">
                         <TextBlock Text="{Binding Mic.Gain, StringFormat={}{0:0}%}" DockPanel.Dock="Right" Foreground="{StaticResource Muted}" FontSize="13"/>
                         <TextBlock Text="Input level" Style="{StaticResource Label}" Margin="0"/>
                     </DockPanel>
-                    <Slider Minimum="0" Maximum="100" Value="{Binding Mic.Gain}" Margin="0,0,0,18"/>
+                    <Slider Minimum="0" Maximum="100" Value="{Binding Mic.Gain}" Margin="0,0,0,12"/>
+
+                    <DockPanel Margin="0,0,0,2">
+                        <TextBlock x:Name="BoostValue" DockPanel.Dock="Right" Foreground="{StaticResource Muted}" FontSize="13"/>
+                        <TextBlock Text="Mic boost" Style="{StaticResource Label}" Margin="0"/>
+                    </DockPanel>
+                    <Slider x:Name="BoostSlider" Minimum="-6" Maximum="24" TickFrequency="0.5" IsSnapToTickEnabled="True" ValueChanged="Boost_Changed"/>
+                    <TextBlock x:Name="BoostHint" Text="Makes you louder on top of the input level. Watch the meter: red means distortion." TextWrapping="Wrap" FontSize="11.5" Foreground="{StaticResource Muted}" Margin="0,4,0,18"/>
 
                     <ToggleButton Style="{StaticResource MuteButton}" IsChecked="{Binding Mic.Muted}" Height="44">
                         <TextBlock x:Name="MuteLabel" Text="Mute mic" FontSize="14" FontWeight="SemiBold"/>
@@ -82,12 +89,7 @@
                     <TextBlock Text="Voice tone" Style="{StaticResource Label}"/>
                     <WrapPanel x:Name="PresetPanel" Margin="0,0,0,14"/>
 
-                    <DockPanel Margin="0,0,0,6">
-                        <TextBlock x:Name="BoostValue" DockPanel.Dock="Right" Foreground="{StaticResource Muted}" FontSize="13"/>
-                        <TextBlock Text="Voice boost" Style="{StaticResource Label}" Margin="0"/>
-                    </DockPanel>
-                    <Slider x:Name="BoostSlider" Minimum="-6" Maximum="12" TickFrequency="0.5" IsSnapToTickEnabled="True" ValueChanged="Boost_Changed"/>
-                    <TextBlock Text="Effects run inside Windows' audio engine, so Discord's stream can't record them." TextWrapping="Wrap" FontSize="11.5" Foreground="{StaticResource Muted}" Margin="0,18,0,0"/>
+                    <TextBlock Text="Effects and mic boost run inside Windows' audio engine, so Discord's stream can't record them." TextWrapping="Wrap" FontSize="11.5" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
                 </StackPanel>
             </Border>
 

@@ -122,17 +122,20 @@ public sealed class MicController : Observable, IDisposable
     public void Dispose() { _device?.Dispose(); _enum.Dispose(); }
 }
 
-/// <summary>One app in the mixer (all of its audio sessions across output devices).</summary>
+/// <summary>
+/// One app in the mixer: every process with the same app name (Discord runs several) and all
+/// of their audio sessions across output devices.
+/// </summary>
 public sealed class AppChannel : Observable
 {
     readonly AppMixer _mixer;
     bool _updating;
-    public uint Pid { get; }
     public string Name { get; }
     public string Initial => Name.Length > 0 ? Name[..1].ToUpperInvariant() : "?";
+    internal List<uint> Pids { get; } = new();
     internal List<AudioSessionControl> Sessions { get; } = new();
 
-    public AppChannel(AppMixer mixer, uint pid, string name) { _mixer = mixer; Pid = pid; Name = name; }
+    public AppChannel(AppMixer mixer, string name) { _mixer = mixer; Name = name; }
 
     double _volume;
     public double Volume
@@ -163,7 +166,7 @@ public sealed class AppChannel : Observable
         set
         {
             if (!Set(ref _output, value) || _updating || value == null) return;
-            AudioPolicyConfig.SetAppOutput(Pid, value.Id);
+            foreach (var pid in Pids) AudioPolicyConfig.SetAppOutput(pid, value.Id);
         }
     }
 
@@ -180,7 +183,7 @@ public sealed class AppChannel : Observable
                 Volume = Math.Round(first.SimpleAudioVolume.Volume * 100);
                 Muted = first.SimpleAudioVolume.Mute;
             }
-            var pinned = AudioPolicyConfig.GetAppOutput(Pid);
+            var pinned = Pids.Select(AudioPolicyConfig.GetAppOutput).FirstOrDefault(p => p != null);
             Output = Outputs.FirstOrDefault(o => o.Id == pinned) ?? Outputs[0];
         }
         catch { }
@@ -211,8 +214,8 @@ public sealed class AppMixer : IDisposable
             foreach (var w in wanted) Outputs.Add(w);
         }
 
-        // Collect live sessions per process across every output device.
-        var found = new Dictionary<uint, (string name, List<AudioSessionControl> sessions)>();
+        // Collect live sessions per app name (all of its processes) across every output device.
+        var found = new Dictionary<string, (HashSet<uint> pids, List<AudioSessionControl> sessions)>(StringComparer.OrdinalIgnoreCase);
         foreach (var dev in devices)
         {
             SessionCollection sessions;
@@ -226,30 +229,33 @@ public sealed class AppMixer : IDisposable
                     if (s.IsSystemSoundsSession || s.State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateExpired) continue;
                     var pid = s.GetProcessID;
                     if (pid == 0) continue;
-                    if (!found.TryGetValue(pid, out var entry))
+                    var name = NameOf(pid);
+                    if (name == null) continue;
+                    if (!found.TryGetValue(name, out var entry))
                     {
-                        var name = NameOf(pid);
-                        if (name == null) continue;
-                        entry = (name, new List<AudioSessionControl>());
-                        found[pid] = entry;
+                        entry = (new HashSet<uint>(), new List<AudioSessionControl>());
+                        found[name] = entry;
                     }
+                    entry.pids.Add(pid);
                     entry.sessions.Add(s);
                 }
                 catch { }
             }
         }
 
-        foreach (var gone in Apps.Where(a => !found.ContainsKey(a.Pid)).ToList()) Apps.Remove(gone);
-        foreach (var (pid, (name, sessions)) in found.OrderBy(f => f.Value.name, StringComparer.OrdinalIgnoreCase))
+        foreach (var gone in Apps.Where(a => !found.ContainsKey(a.Name)).ToList()) Apps.Remove(gone);
+        foreach (var (name, (pids, sessions)) in found)
         {
-            var app = Apps.FirstOrDefault(a => a.Pid == pid);
+            var app = Apps.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
             if (app == null)
             {
-                app = new AppChannel(this, pid, name);
+                app = new AppChannel(this, name);
                 int idx = 0;
                 while (idx < Apps.Count && string.Compare(Apps[idx].Name, name, StringComparison.OrdinalIgnoreCase) < 0) idx++;
                 Apps.Insert(idx, app);
             }
+            app.Pids.Clear();
+            app.Pids.AddRange(pids);
             app.Sessions.Clear();
             app.Sessions.AddRange(sessions);
             app.Sync();
