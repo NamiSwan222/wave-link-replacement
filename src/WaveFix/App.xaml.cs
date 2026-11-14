@@ -13,6 +13,11 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Headless helper roles used by one-click setup (no window, no tray, no single-instance check).
+        if (e.Args.Length >= 3 && e.Args[0] == "--setup") { Shutdown(Setup.RunElevated(e.Args[1], e.Args[2])); return; }
+        if (e.Args.Length >= 3 && e.Args[0] == "--system-attach") { Shutdown(Setup.SystemAttach(e.Args[1], e.Args[2])); return; }
+
         bool updated = e.Args.Contains("--updated");
 
         _single = new Mutex(true, @"Local\WaveFix.SingleInstance", out bool first);

@@ -218,6 +218,10 @@
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="B" Property="Background" Value="#4F46E5"/>
                             </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="B" Property="Background" Value="#33334F"/>
+                                <Setter Property="Opacity" Value="0.75"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>

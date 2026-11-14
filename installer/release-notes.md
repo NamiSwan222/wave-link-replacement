@@ -14,9 +14,9 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 - **Plugins:** add or scan for your own 64-bit VST2 effects
 - **Shortcuts:** global hotkeys: mute, push to talk, boost, and more
 
-## First-time setup
+## First-time setup is automatic
 
-WaveFix is the control panel; the effects need **[Equalizer APO](https://sourceforge.net/projects/equalizerapo/)** (tick only your real mic in its Device Selector) and the **[RNNoise](https://github.com/werman/noise-suppression-for-voice/releases)** plugin. WaveFix's main screen tells you exactly what's missing. Full guide in the [README](https://github.com/NamiSwan222/wave-link-replacement#setup).
+Open WaveFix and click **Set it up for me**. After one Windows permission prompt it installs **[Equalizer APO](https://sourceforge.net/projects/equalizerapo/)**, adds the **[RNNoise](https://github.com/werman/noise-suppression-for-voice)** noise removal plugin, connects the effects to your mic (in the slot Discord can't skip), and restarts Windows audio. Every download is checked against a pinned fingerprint. Steps already done are skipped.
 
 ## Verify the download
 

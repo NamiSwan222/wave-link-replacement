@@ -65,6 +65,7 @@
                 </StackPanel>
 
                 <StackPanel>
+                    <RadioButton x:Name="NavSetup" Style="{StaticResource NavItem}" GroupName="nav" Content="Setup" Tag="&#xE713;" Checked="Nav_Checked" Visibility="Collapsed"/>
                     <RadioButton x:Name="NavMic" Style="{StaticResource NavItem}" GroupName="nav" Content="Microphone" Tag="&#xE720;" IsChecked="True" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavMixer" Style="{StaticResource NavItem}" GroupName="nav" Content="App mixer" Tag="&#xE767;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavPlugins" Style="{StaticResource NavItem}" GroupName="nav" Content="Plugins" Tag="&#xEA86;" Checked="Nav_Checked"/>
@@ -75,6 +76,68 @@
 
         <!-- ============ Pages ============ -->
         <Grid Grid.Column="1">
+
+            <!-- ===== Setup ===== -->
+            <ScrollViewer x:Name="PageSetup" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26">
+                <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+                    <TextBlock Text="Let's set up your mic" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Text="WaveFix can install and connect everything for you. It takes about a minute." Style="{StaticResource PageSubtitle}"/>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="Which mic do you talk into?" Style="{StaticResource Label}" Margin="0,0,0,8"/>
+                            <ComboBox ItemsSource="{Binding Mic.Devices}" SelectedItem="{Binding Mic.Selected}" Margin="0,0,0,6" AutomationProperties.Name="Microphone to set up"/>
+                            <TextBlock Text="Pick your real microphone, not anything called &quot;Elgato Virtual Audio&quot;." Style="{StaticResource Hint}" Margin="0,0,0,20"/>
+
+                            <ItemsControl x:Name="SetupSteps">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,0,0,14">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="32" Height="32" CornerRadius="16" Background="#25253D" VerticalAlignment="Top">
+                                                <TextBlock Text="{Binding Glyph}" Style="{StaticResource Icon}" FontSize="14" Foreground="{Binding Color}" HorizontalAlignment="Center"/>
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Title}" Style="{StaticResource Label}"/>
+                                                <TextBlock Text="{Binding Message}" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <Border x:Name="SetupResult" CornerRadius="12" Padding="14,12" Margin="0,4,0,16" Visibility="Collapsed">
+                                <TextBlock x:Name="SetupResultText" Style="{StaticResource Hint}" Foreground="{StaticResource Text}" FontSize="13"/>
+                            </Border>
+
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="SetupButton" Style="{StaticResource PrimaryButton}" Height="48" Padding="22,0" Click="RunSetup_Click"
+                                        AutomationProperties.Name="Run setup">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE768;" Style="{StaticResource Icon}" FontSize="14" Foreground="White" Margin="0,0,10,0"/>
+                                        <TextBlock x:Name="SetupButtonText" Text="Set it up for me" FontWeight="Bold" FontSize="14.5" Foreground="White" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border CornerRadius="12" Background="#16162B" Padding="14,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Grid.Column="1" Style="{StaticResource Hint}"
+                                       Text="Windows will ask for permission once. Your sound drops for a few seconds at the end while Windows audio restarts. WaveFix downloads Equalizer APO (from SourceForge) and the RNNoise plugin (from GitHub) and checks each against a known fingerprint before using it. Steps that are already done are skipped."/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
 
             <!-- ===== Microphone ===== -->
             <ScrollViewer x:Name="PageMic" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26">
@@ -88,7 +151,12 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
+                            <Button x:Name="BannerAction" Grid.Column="2" Style="{StaticResource PrimaryButton}" Height="40" Padding="16,0" Margin="14,0,0,0"
+                                    VerticalAlignment="Center" Click="OpenSetup_Click" Visibility="Collapsed" AutomationProperties.Name="Set it up for me">
+                                <TextBlock Text="Set it up for me" FontWeight="Bold" FontSize="13.5" Foreground="White"/>
+                            </Button>
                             <Border x:Name="BannerIconBg" Width="34" Height="34" CornerRadius="17" Background="{StaticResource Good}" VerticalAlignment="Top">
                                 <TextBlock x:Name="BannerIcon" Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="15" Foreground="#0F0F23" HorizontalAlignment="Center"/>
                             </Border>

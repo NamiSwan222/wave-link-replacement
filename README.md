@@ -65,6 +65,16 @@ git tag v0.3.1 && git push origin v0.3.1
 
 ## Setup
 
+**Automatic:** open WaveFix and click **Set it up for me** (Setup tab, or the button on the
+status banner). After one UAC prompt, an admin helper (`WaveFix.exe --setup`) installs
+Equalizer APO 1.4.2 silently, extracts `rnnoise_mono.dll` from the RNNoise v1.10 release,
+saves Equalizer APO's child-APO backup for the mic, briefly runs `WaveFix.exe --system-attach`
+as SYSTEM through a temporary scheduled task to put Equalizer APO in the mic's endpoint slot,
+and restarts Windows Audio. Downloads are pinned by SHA-256 and kept in an admin-only folder
+until verified. Done steps are skipped.
+
+**Manual** (what the automatic setup does):
+
 1. Install [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) 1.4.2. In Device
    Selector, tick only your physical mic on the **Capture devices** tab.
 2. Put `rnnoise_mono.dll` from the RNNoise release's `vst` folder in

@@ -116,16 +116,26 @@ public partial class MainWindow : Window
         _updateTimer.Tick += (_, _) => { _updateTimer.Interval = TimeSpan.FromHours(6); _ = CheckForUpdates(userAsked: false); };
         _updateTimer.Start();
 
+        // Setup page
+        foreach (var t in Setup.StepTitles) _setupSteps.Add(new SetupStepRow(t));
+        SetupSteps.ItemsSource = _setupSteps;
+        RefreshSetupChecklist();
+        Mic.DeviceChanged += RefreshSetupChecklist;
+
         _loading = false;
         if (Mic.DeviceId != null) _settings.MicDeviceId = Mic.DeviceId;
         ApplyEffects();
+
+        // First run on a PC that isn't set up yet: open on the Setup page.
+        if (Mic.DeviceId != null && !Setup.IsComplete(Mic.DeviceId)) { NavSetup.Visibility = Visibility.Visible; NavSetup.IsChecked = true; }
     }
 
     // ---------- Navigation ----------
 
     void Nav_Checked(object sender, RoutedEventArgs e)
     {
-        if (PageMic == null) return; // fires during InitializeComponent
+        if (PageMic == null || PageSetup == null) return; // fires during InitializeComponent
+        PageSetup.Visibility = NavSetup.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageMic.Visibility = NavMic.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageMixer.Visibility = NavMixer.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PagePlugins.Visibility = NavPlugins.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -185,22 +195,28 @@ public partial class MainWindow : Window
 
     void UpdateStatus()
     {
-        if (!_engine.IsInstalled)
-        { SetStatus(StatusKind.Bad, "One more thing to install", "WaveFix needs Equalizer APO to run your effects. Install it, then tick your mic in its Device Selector.", "Setup needed"); return; }
+        bool needsSetup = Mic.DeviceId != null && !Setup.IsComplete(Mic.DeviceId);
+        BannerAction.Visibility = needsSetup && !_setupRunning ? Visibility.Visible : Visibility.Collapsed;
+        if (!needsSetup && NavSetup.IsChecked != true) NavSetup.Visibility = Visibility.Collapsed;
+        if (needsSetup) NavSetup.Visibility = Visibility.Visible;
+        if (!_setupRunning) RefreshSetupChecklist();
+
         if (Mic.DeviceId == null)
         { SetStatus(StatusKind.Bad, "No microphone found", "Plug in your mic and it'll show up here.", "No mic"); return; }
+        if (!_engine.IsInstalled)
+        { SetStatus(StatusKind.Bad, "Let's finish setting up", "WaveFix needs a free audio add-on (Equalizer APO) to run your effects. It can install everything for you.", "Setup needed"); return; }
         if (Process.GetProcessesByName("Elgato.WaveLink").Length > 0)
         { SetStatus(StatusKind.Warn, "Wave Link is still open", "Close Wave Link. While it runs, people watching your Discord stream can hear your mic.", "Close Wave Link"); return; }
 
         switch (EffectsEngine.GetSlot(Mic.DeviceId))
         {
             case EffectsEngine.SlotState.None:
-                SetStatus(StatusKind.Bad, "Effects aren't connected to this mic", "Open Equalizer APO's Device Selector and tick this mic on the Capture devices tab.", "Setup needed"); break;
+                SetStatus(StatusKind.Bad, "Effects aren't connected to this mic", "One click connects them, so every app, Discord included, hears your cleaned-up voice.", "Setup needed"); break;
             case EffectsEngine.SlotState.StreamOnly:
-                SetStatus(StatusKind.Warn, "Almost there", "Discord skips the effects in this setup. Run tools\\run-as-system.ps1 as admin to fix it.", "Almost there"); break;
+                SetStatus(StatusKind.Warn, "Almost there", "Discord skips the effects in this setup. One click fixes it.", "Almost there"); break;
             default:
                 if (_settings.NoiseRemoval && !_engine.HasNoisePlugin)
-                    SetStatus(StatusKind.Warn, "Noise removal is missing a file", "Put rnnoise_mono.dll in Equalizer APO's VSTPlugins\\rnnoise folder.", "Missing file");
+                    SetStatus(StatusKind.Warn, "Noise removal is missing a file", "One click downloads and adds the noise removal plugin.", "Missing file");
                 else if (Mic.Muted)
                     SetStatus(StatusKind.Warn, "Your mic is muted", "Nobody can hear you right now. Click the mute button or use your shortcut to talk.", "Mic muted");
                 else
@@ -233,6 +249,96 @@ public partial class MainWindow : Window
         StartupRegistration.Set(StartupSwitch.IsChecked == true);
         _settings.StartWithWindows = StartupSwitch.IsChecked == true;
         _settings.Save();
+    }
+
+    // ---------- Setup ----------
+
+    readonly ObservableCollection<SetupStepRow> _setupSteps = new();
+    bool _setupRunning, _setupShowsResult;
+
+    void OpenSetup_Click(object sender, RoutedEventArgs e)
+    {
+        _setupShowsResult = false; // a new problem appeared: show a fresh checklist
+        SetupResult.Visibility = Visibility.Collapsed;
+        NavSetup.Visibility = Visibility.Visible;
+        NavSetup.IsChecked = true;
+    }
+
+    void RefreshSetupChecklist()
+    {
+        // Keep a finished run's results on screen (Installed / Connected / Audio is back).
+        if (_setupRunning || _setupShowsResult || Mic.DeviceId == null || _setupSteps.Count == 0) return;
+        var done = Setup.DoneSteps(Mic.DeviceId);
+        string[] todo =
+        {
+            "Free audio engine add-on that runs your effects inside Windows.",
+            "AI noise removal (RNNoise), checked and copied into place.",
+            "Puts the effects on this mic so Discord, OBS and every app get them.",
+            "Only if something changed. Sound drops for a few seconds.",
+        };
+        for (int i = 0; i < _setupSteps.Count; i++)
+        {
+            _setupSteps[i].State = done[i] ? "DONE" : "WAIT";
+            _setupSteps[i].Message = done[i] ? "Already done" : todo[i];
+        }
+        bool complete = Setup.IsComplete(Mic.DeviceId);
+        SetupButtonText.Text = complete ? "Everything's set up" : "Set it up for me";
+        SetupButton.IsEnabled = !complete;
+    }
+
+    async void RunSetup_Click(object sender, RoutedEventArgs e)
+    {
+        if (_setupRunning || Mic.DeviceId == null) return;
+        var micId = Mic.DeviceId;
+        _setupRunning = true;
+        SetupButton.IsEnabled = false;
+        SetupButtonText.Text = "Setting up…";
+        SetupResult.Visibility = Visibility.Collapsed;
+        foreach (var s in _setupSteps) if (s.State != "DONE") { s.State = "WAIT"; }
+
+        var progress = new Progress<(int step, string state, string message)>(p =>
+        {
+            if (p.step >= 0 && p.step < _setupSteps.Count)
+            {
+                _setupSteps[p.step].State = p.state;
+                _setupSteps[p.step].Message = p.state == "SKIP" ? "Already done" : p.message;
+            }
+            else if (p.state == "FAIL")
+            {
+                foreach (var s in _setupSteps.Where(s => s.State == "RUN")) { s.State = "FAIL"; s.Message = "Didn't finish"; }
+                ShowSetupResult(false, p.message);
+            }
+        });
+
+        bool ok;
+        try { ok = await Setup.RunAsync(micId, progress); }
+        catch (Exception ex) { ok = false; ShowSetupResult(false, ex.Message); }
+        _setupRunning = false;
+        _setupShowsResult = ok;
+
+        if (ok)
+        {
+            _settings.MicDeviceId = micId;
+            ApplyEffects(); // write the effect chain for this mic now that the engine is in place
+            ShowSetupResult(true, "All done! Your effects now work in Discord, OBS and every other app. Head to Microphone to tune your sound.");
+            SetupButtonText.Text = "Everything's set up";
+            SetupButton.IsEnabled = false;
+        }
+        else
+        {
+            if (SetupResult.Visibility != Visibility.Visible)
+                ShowSetupResult(false, "Setup didn't finish. Nothing harmful was left half-done; you can try again.");
+            SetupButtonText.Text = "Try again";
+            SetupButton.IsEnabled = true;
+        }
+        UpdateStatus();
+    }
+
+    void ShowSetupResult(bool good, string text)
+    {
+        SetupResult.Visibility = Visibility.Visible;
+        SetupResult.Background = (Brush)FindResource(good ? "GoodSoft" : "BadSoft");
+        SetupResultText.Text = text;
     }
 
     // ---------- Updates ----------
