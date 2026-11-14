@@ -51,6 +51,7 @@ public sealed unsafe class VstPlugin : IDisposable
     readonly delegate* unmanaged[Cdecl]<IntPtr, int, int, IntPtr, IntPtr, float, IntPtr> _dispatch;
     readonly delegate* unmanaged[Cdecl]<IntPtr, int, float, void> _setParam;
     readonly delegate* unmanaged[Cdecl]<IntPtr, int, float> _getParam;
+    readonly delegate* unmanaged[Cdecl]<IntPtr, float**, float**, int, void> _process;
 
     VstPlugin(IntPtr effect)
     {
@@ -58,6 +59,7 @@ public sealed unsafe class VstPlugin : IDisposable
         _dispatch = (delegate* unmanaged[Cdecl]<IntPtr, int, int, IntPtr, IntPtr, float, IntPtr>)Marshal.ReadIntPtr(effect, 8);
         _setParam = (delegate* unmanaged[Cdecl]<IntPtr, int, float, void>)Marshal.ReadIntPtr(effect, 24);
         _getParam = (delegate* unmanaged[Cdecl]<IntPtr, int, float>)Marshal.ReadIntPtr(effect, 32);
+        _process = (delegate* unmanaged[Cdecl]<IntPtr, float**, float**, int, void>)Marshal.ReadIntPtr(effect, 120);
     }
 
     public static VstPlugin Load(string path)
@@ -166,22 +168,113 @@ public sealed unsafe class VstPlugin : IDisposable
         // The DLL stays loaded: some plugins crash when unloaded, and this process exits soon anyway.
     }
 
+    // ---- Audio: fed live audio so the plugin's window can show meters, graphs and readings ----
+
+    const int effStartProcess = 71, effStopProcess = 72;
+    const int MaxBlock = 1024;
+    static int _rate = 48000;
+    [ThreadStatic] static bool _onAudioThread;
+    float** _inPtrs, _outPtrs;
+    int _inputs, _outputs;
+    bool _processing;
+
+    /// <summary>VST 2.4 VstTimeInfo, handed to plugins that ask for the time (some crash on null).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    struct VstTimeInfo
+    {
+        public double samplePos, sampleRate, nanoSeconds, ppqPos, tempo, barStartPos, cycleStartPos, cycleEndPos;
+        public int timeSigNumerator, timeSigDenominator, smpteOffset, smpteFrameRate, samplesToNextClock, flags;
+    }
+    static readonly VstTimeInfo* Time = InitTime();
+    static VstTimeInfo* InitTime()
+    {
+        var t = (VstTimeInfo*)NativeMemory.AllocZeroed((nuint)sizeof(VstTimeInfo));
+        t->sampleRate = 48000; t->tempo = 120; t->timeSigNumerator = 4; t->timeSigDenominator = 4;
+        t->flags = 2 | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 13); // playing, ppq/tempo/bars/time signature valid
+        return t;
+    }
+
+    /// <summary>
+    /// Gets the plugin ready for audio at this rate (suspend, set rate and block size, resume,
+    /// start processing, as VST 2.4 hosts do). Call from the thread that will call Process.
+    /// </summary>
+    public void StartProcessing(int rate)
+    {
+        _onAudioThread = true;
+        if (_processing) StopProcessing();
+        _rate = rate;
+        Time->sampleRate = rate;
+        _inputs = Math.Max(1, Marshal.ReadInt32(_effect, 48));
+        _outputs = Math.Max(1, Marshal.ReadInt32(_effect, 52));
+        if (_inPtrs == null)
+        {
+            _inPtrs = (float**)NativeMemory.AllocZeroed((nuint)(sizeof(float*) * 64));
+            _outPtrs = (float**)NativeMemory.AllocZeroed((nuint)(sizeof(float*) * 64));
+            for (int i = 0; i < 64; i++)
+            {
+                _inPtrs[i] = (float*)NativeMemory.AllocZeroed(MaxBlock * sizeof(float));
+                _outPtrs[i] = (float*)NativeMemory.AllocZeroed(MaxBlock * sizeof(float));
+            }
+        }
+        Dispatch(effMainsChanged, 0, 0);
+        Dispatch(effSetSampleRate, opt: rate);
+        Dispatch(effSetBlockSize, value: MaxBlock);
+        Dispatch(effMainsChanged, 0, 1);
+        Dispatch(effStartProcess);
+        _processing = true;
+    }
+
+    /// <summary>Runs a block of mono audio through the plugin (into every input); the output is dropped.</summary>
+    public void Process(ReadOnlySpan<float> mono)
+    {
+        if (!_processing) return;
+        for (int done = 0; done < mono.Length; done += MaxBlock)
+        {
+            int n = Math.Min(MaxBlock, mono.Length - done);
+            var block = mono.Slice(done, n);
+            for (int c = 0; c < Math.Min(_inputs, 64); c++) block.CopyTo(new Span<float>(_inPtrs[c], n));
+            _process(_effect, _inPtrs, _outPtrs, n);
+            Time->samplePos += n;
+            Time->ppqPos = Time->samplePos / _rate * Time->tempo / 60.0;
+            Time->barStartPos = Math.Floor(Time->ppqPos / 4) * 4;
+        }
+    }
+
+    public void StopProcessing()
+    {
+        if (!_processing) return;
+        _processing = false;
+        try { Dispatch(effStopProcess); Dispatch(effMainsChanged, 0, 0); } catch { }
+    }
+
+    static void WriteText(IntPtr ptr, string s, int max)
+    {
+        if (ptr == IntPtr.Zero) return;
+        var b = Encoding.ASCII.GetBytes(s.Length >= max ? s[..(max - 1)] : s);
+        Marshal.Copy(b, 0, ptr, b.Length);
+        Marshal.WriteByte(ptr, b.Length, 0);
+    }
+
     static IntPtr OnHost(IntPtr effect, int opcode, int index, IntPtr value, IntPtr ptr, float opt)
     {
         switch (opcode)
         {
             case 0: Automated?.Invoke(); return 0;                          // audioMasterAutomate
             case 1: return 2400;                                            // audioMasterVersion
+            case 7: return (IntPtr)Time;                                    // audioMasterGetTime
             case 15: SizeWindowRequested?.Invoke(index, (int)value); return 1; // audioMasterSizeWindow
-            case 16: return 48000;                                          // audioMasterGetSampleRate
-            case 17: return 512;                                            // audioMasterGetBlockSize
-            case 32: case 33:                                               // vendor / product string
-                if (ptr != IntPtr.Zero) { var b = Encoding.ASCII.GetBytes("WaveFix\0"); Marshal.Copy(b, 0, ptr, b.Length); }
-                return 1;
+            case 16: return _rate;                                          // audioMasterGetSampleRate
+            case 17: return MaxBlock;                                       // audioMasterGetBlockSize
+            case 23: return _onAudioThread ? 2 : 1;                         // audioMasterGetCurrentProcessLevel: realtime / user
+            case 24: return 1;                                              // audioMasterGetAutomationState: off
+            case 32: WriteText(ptr, "WaveFix", 64); return 1;               // audioMasterGetVendorString
+            case 33: WriteText(ptr, "WaveFix", 64); return 1;               // audioMasterGetProductString
+            case 34: return 1000;                                           // audioMasterGetVendorVersion
             case 37:                                                        // audioMasterCanDo
                 var s = ptr != IntPtr.Zero ? Marshal.PtrToStringAnsi(ptr) : null;
-                return s == "sizeWindow" ? 1 : 0;
-            case 42: return 1;                                              // audioMasterUpdateDisplay
+                return s is "sizeWindow" or "sendVstTimeInfo" ? 1 : -1;
+            case 38: return 1;                                              // audioMasterGetLanguage: English
+            case 42: case 43: case 44: return 1;                            // updateDisplay, beginEdit, endEdit
             default: return 0;
         }
     }

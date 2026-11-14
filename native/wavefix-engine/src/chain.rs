@@ -104,6 +104,10 @@ enum Processor {
 pub struct Chain {
     channels: usize,
     procs: Vec<Processor>,
+    /// For each processor, its stage number in the config (1-based), so a plugin settings window
+    /// can ask for the audio entering "stage N" even if an earlier stage was skipped.
+    stage_of: Vec<u32>,
+    rate: f32,
     /// Per-channel scratch, sized for `max_frames`.
     planes: Vec<Vec<f32>>,
     max_frames: usize,
@@ -117,7 +121,10 @@ impl Chain {
         let channels = channels.max(1);
         let mut warnings = Vec::new();
         let mut procs = Vec::new();
-        for stage in &cfg.stages {
+        let mut stage_of = Vec::new();
+        crate::vst::set_host_format(sr, max_frames);
+        for (index, stage) in cfg.stages.iter().enumerate() {
+            let before = procs.len();
             match stage {
                 Stage::Filter { kind, freq, gain, q } => match Biquad::new(kind, sr, *freq, *gain, *q) {
                     Some(b) => procs.push(Processor::Filter(vec![b; channels])),
@@ -144,8 +151,9 @@ impl Chain {
                     }
                 }
             }
+            if procs.len() > before { stage_of.push(index as u32 + 1); }
         }
-        Chain { channels, procs, planes: vec![vec![0.0; max_frames]; channels], max_frames, warnings }
+        Chain { channels, procs, stage_of, rate: sr, planes: vec![vec![0.0; max_frames]; channels], max_frames, warnings }
     }
 
     pub fn channels(&self) -> usize { self.channels }
@@ -174,7 +182,14 @@ impl Chain {
     }
 
     fn process_planes(&mut self, n: usize) {
-        for proc in &mut self.procs {
+        // A plugin settings window in the app may want the audio entering one stage (to drive its
+        // meters). The bridge is only mapped when the app has created it; checking is cheap.
+        let tap = wavefix_fx::bridge::attach_rt().map(|h| (h, h.tap_request())).filter(|(_, s)| *s != 0);
+        crate::vst::advance_time(n);
+        for (i, proc) in self.procs.iter_mut().enumerate() {
+            if let Some((h, stage)) = tap {
+                if self.stage_of[i] == stage { h.tap_push(self.rate as u32, &self.planes[0][..n]); }
+            }
             match proc {
                 Processor::Filter(fs) => {
                     for (f, plane) in fs.iter_mut().zip(self.planes.iter_mut()) {

@@ -425,6 +425,20 @@ public static class WaveFixEngine
         return new JsonObject { ["stages"] = stages }.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 
+    /// <summary>The 1-based stage number of a plugin in the engine config for these settings, or 0.</summary>
+    public static int StageOf(AppSettings s, string pluginPath)
+    {
+        try
+        {
+            var stages = JsonNode.Parse(BuildConfig(s))?["stages"]?.AsArray();
+            for (int i = 0; i < (stages?.Count ?? 0); i++)
+                if (stages![i]?["type"]?.GetValue<string>() == "vst" &&
+                    string.Equals(stages[i]?["path"]?.GetValue<string>(), pluginPath, StringComparison.OrdinalIgnoreCase)) return i + 1;
+        }
+        catch { }
+        return 0;
+    }
+
     public static void WriteConfig(string endpointId, AppSettings s)
     {
         var path = ConfigPath(endpointId);

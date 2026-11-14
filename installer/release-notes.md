@@ -19,6 +19,9 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 
 ## New in this version
 
+- **Plugin windows show live readings.** When you open a plugin's settings (or Adjust on noise removal), WaveFix feeds it the live audio from your mic exactly as it reaches that plugin, so meters, gain reduction, analyzers and "learn" buttons work. The window says when it's live.
+- Plugins are hosted more like a real audio app (start/stop processing, sample rate, timing info), which some plugins need to work or to show anything.
+- After updating, WaveFix asks to **update the audio engine**: click **Set it up for me** once.
 - **Fix:** switching from Equalizer APO could leave "!KEY" entries in your mic's effect settings, which stopped Windows from running any of the mic's effects. WaveFix now shows the mic as not set up: click **Set it up for me** once to repair it.
 - **Test my effects** (Setup page): records from your mic for a moment and tells you whether WaveFix's engine is running on it, and what to do if not. It adds no sound, and runs by itself after setup.
 - **Clean uninstall:** uninstalling WaveFix (or **Remove the WaveFix engine** on the Setup page) takes the engine off every mic, puts their original settings back and deletes it from Program Files (one Windows permission prompt).

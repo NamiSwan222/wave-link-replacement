@@ -23,7 +23,11 @@
 //!   64 u64 RVC output written (the engine has written converted voice up to here)
 //!   72 u64 RVC engine heartbeat
 //!   80 u32 RVC delay in samples (output for position p is played at p + delay)
-//!   128 f32 soundboard ring, then RVC input ring, then RVC output ring (each ring length)
+//!   Plugin tap (the audio entering one stage of WaveFix's engine, for a plugin's settings window):
+//!   84 u32 stage asked for (1-based, 0 = none)   88 u32 tap sample rate
+//!   96 u64 tap written up to (absolute sample index)   104 u64 app heartbeat for the tap
+//!   128 f32 soundboard ring, RVC input ring, RVC output ring, tap ring (each ring length).
+//!   The tap ring is optional (older files have three rings), so version stays 2.
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU64, Ordering};
@@ -32,6 +36,8 @@ pub const MAGIC: u32 = 0x5242_4657; // "WFBR"
 pub const VERSION: u32 = 2;
 pub const HEADER: usize = 128;
 const RINGS: i64 = 3;
+/// The mapped file also has the fourth (tap) ring.
+static TAP_RING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const MAX_RING: u32 = 1 << 22;
 
 #[allow(non_snake_case)]
@@ -93,7 +99,10 @@ pub fn attach() -> Option<&'static Header> {
             return None;
         }
         match VIEW.compare_exchange(std::ptr::null_mut(), view, Ordering::AcqRel, Ordering::Acquire) {
-            Ok(_) => Some(h),
+            Ok(_) => {
+                TAP_RING.store(HEADER as i64 + 4 * 4 * len as i64 <= size, Ordering::Release);
+                Some(h)
+            }
             Err(existing) => {
                 UnmapViewOfFile(view as *const c_void);
                 Some(&*(existing as *const Header))
@@ -128,10 +137,15 @@ pub struct Header {
     pub rvc_out_write: AtomicU64,
     pub rvc_engine_beat: AtomicU64,
     pub rvc_delay: AtomicU32,
+    pub tap_stage: AtomicU32,
+    pub tap_rate: AtomicU32,
+    _reserved: AtomicU32,
+    pub tap_write: AtomicU64,
+    pub tap_beat: AtomicU64,
 }
 
 /// Bytes of shared memory needed for a ring length (header + three rings).
-pub const fn bytes_for(ring_len: u32) -> usize { HEADER + 3 * 4 * ring_len as usize }
+pub const fn bytes_for(ring_len: u32) -> usize { HEADER + 4 * 4 * ring_len as usize }
 
 impl Header {
     /// Sets up a header in caller-owned memory of at least `bytes_for(ring_len)` bytes, 8-aligned
@@ -140,6 +154,7 @@ impl Header {
     /// # Safety
     /// `mem` must be valid, aligned and large enough, and outlive every use of the result.
     pub unsafe fn init<'a>(mem: *mut u8, ring_len: u32) -> &'a Header {
+        TAP_RING.store(true, Ordering::Release);
         let h = unsafe { &*(mem as *const Header) };
         h.ring_len.store(ring_len, Ordering::Relaxed);
         h.version.store(VERSION, Ordering::Relaxed);
@@ -163,6 +178,34 @@ impl Header {
     fn ring_n(&self, n: usize) -> (*const f32, u64) {
         let len = self.ring_len.load(Ordering::Relaxed) as u64;
         (unsafe { (self as *const Header as *const u8).add(HEADER + n * 4 * len as usize) as *const f32 }, len)
+    }
+
+    /// The stage whose input a plugin settings window wants to see (1-based), or 0. Only while
+    /// the window keeps its heartbeat fresh, so a closed window never leaves the tap running.
+    pub fn tap_request(&self) -> u32 {
+        if !TAP_RING.load(Ordering::Acquire) { return 0; }
+        let stage = self.tap_stage.load(Ordering::Acquire);
+        if stage == 0 || now_ms().saturating_sub(self.tap_beat.load(Ordering::Relaxed)) > 2000 { 0 } else { stage }
+    }
+
+    /// Appends audio (one channel) to the tap ring. Real-time safe: no allocation, no locks.
+    pub fn tap_push(&self, rate: u32, data: &[f32]) {
+        if !TAP_RING.load(Ordering::Acquire) { return; }
+        let (ring, len) = self.ring_n(3);
+        let mask = len - 1;
+        let start = self.tap_write.load(Ordering::Relaxed);
+        for (i, v) in data.iter().enumerate() {
+            unsafe { *(ring as *mut f32).add(((start + i as u64) & mask) as usize) = if v.is_finite() { *v } else { 0.0 }; }
+        }
+        self.tap_rate.store(rate, Ordering::Relaxed);
+        self.tap_write.store(start + data.len() as u64, Ordering::Release);
+    }
+
+    /// Reads tap audio at absolute positions [start, start + out.len()) (test helper; the app
+    /// reads the same ring from C#).
+    pub fn tap_read(&self, start: u64, out: &mut [f32]) {
+        let (ring, len) = self.ring_n(3);
+        for (i, o) in out.iter_mut().enumerate() { *o = unsafe { *ring.add(((start + i as u64) & (len - 1)) as usize) }; }
     }
 
     /// Test helper standing in for the app's RVC engine: reads the voice the plugin sent for

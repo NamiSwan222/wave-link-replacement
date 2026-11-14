@@ -20,7 +20,7 @@ public sealed unsafe class AudioBridge : IDisposable
     const int HeaderBytes = 128;
     public const int RingLen = 1 << 18; // 5.4 s at 48 kHz
     /// <summary>Soundboard ring, RVC input ring, RVC output ring.</summary>
-    const int Rings = 3;
+    const int Rings = 4; // soundboard, RVC in, RVC out, plugin tap
 
     public static string FilePath => Path.Combine(VoiceFx.Folder, "bridge.bin");
 
@@ -131,6 +131,21 @@ public sealed unsafe class AudioBridge : IDisposable
     }
 
     public void WriteRvcOutput(long start, ReadOnlySpan<float> data) => WriteRing(2, start, data);
+
+    // ---- Plugin tap: the engine copies the audio entering one stage here, for a settings window ----
+
+    /// <summary>The stage (1-based) whose input the engine should copy; 0 = none.</summary>
+    public int TapStage { get => (int)U32(84); set => Volatile.Write(ref *(uint*)(_p + 84), (uint)value); }
+    public int TapRate => (int)U32(88);
+    public long TapWritten => Volatile.Read(ref I64(96));
+    /// <summary>Keeps the tap running (the engine stops it 2 s after the last beat).</summary>
+    public void TapBeat() => Volatile.Write(ref I64(104), (long)Environment.TickCount64);
+
+    public void ReadTap(long start, Span<float> dest)
+    {
+        var ring = Ring(3);
+        for (int i = 0; i < dest.Length; i++) dest[i] = ring[(start + i) & (RingLen - 1)];
+    }
 
     public void Dispose()
     {

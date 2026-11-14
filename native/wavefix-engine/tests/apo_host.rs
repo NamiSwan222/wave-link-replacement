@@ -288,6 +288,59 @@ fn engine_behaves_like_a_windows_audio_effect() {
     assert!(status.contains("not in WaveFix's plugin folder"), "status should explain: {status}");
     assert!(status.contains("\"channels\":2"));
 
+    // Plugin tap: a settings window asks for the audio entering stage 2; stage 1 doubles it.
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        let ring: u32 = 1 << 16;
+        let dir = data_dir().join("pd").join("WaveFix").join("Engine");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bridge = dir.join("bridge.bin");
+        let mut f = std::fs::OpenOptions::new().create(true).read(true).write(true).truncate(true).open(&bridge).unwrap();
+        f.set_len((128 + 4 * 4 * ring) as u64).unwrap();
+        let mut header = vec![0u8; 128];
+        header[0..4].copy_from_slice(&0x5242_4657u32.to_le_bytes());
+        header[4..8].copy_from_slice(&2u32.to_le_bytes());
+        header[12..16].copy_from_slice(&ring.to_le_bytes());
+        header[84..88].copy_from_slice(&2u32.to_le_bytes()); // stage 2
+        f.write_all(&header).unwrap();
+        f.flush().unwrap();
+        unsafe { std::env::set_var("ProgramData", data_dir().join("pd")); }
+        let beat = |f: &mut std::fs::File| {
+            let now = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() };
+            f.seek(SeekFrom::Start(104)).unwrap(); f.write_all(&now.to_le_bytes()).unwrap(); f.flush().unwrap();
+        };
+        set_config(r#"{"stages":[{"type":"gain","db":6.0206},{"type":"filter","kind":"hp","freq":20}]}"#);
+        // The engine retries attaching every 3 s; run blocks (with a fresh heartbeat) until it taps.
+        let x = tone(2, 0.5, [0.2, 0.05], [300.0, 900.0]);
+        let tap_written = |f: &mut std::fs::File| { use std::io::Read; let mut b = [0u8; 8]; f.seek(SeekFrom::Start(96)).unwrap(); f.read_exact(&mut b).unwrap(); u64::from_le_bytes(b) };
+        let started = std::time::Instant::now();
+        let mut before = 0;
+        while tap_written(&mut f) == 0 && started.elapsed() < Duration::from_secs(8) {
+            beat(&mut f);
+            let mut y = x.clone(); e.run(&mut y, false);
+            before = tap_written(&mut f);
+        }
+        assert!(before > 0, "the engine never wrote the tap");
+        beat(&mut f);
+        let mut y = x.clone();
+        e.run(&mut y, false);
+        let after = tap_written(&mut f);
+        let frames = x.len() / 2;
+        assert_eq!(after - before, frames as u64, "one tap sample per frame");
+        let mut ringbuf = vec![0u8; 4 * frames];
+        let off = 128 + 3 * 4 * ring as u64 + 4 * (before % ring as u64);
+        { use std::io::Read; f.seek(SeekFrom::Start(off)).unwrap(); f.read_exact(&mut ringbuf).unwrap(); }
+        let tapped: Vec<f32> = ringbuf.chunks(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        let left: Vec<f32> = channel(&x, 2, 0).collect();
+        let worst = tapped.iter().zip(&left).map(|(t, l)| (t - 2.0 * l).abs()).fold(0f32, f32::max);
+        assert!(worst < 1e-4, "tap should be the left channel after stage 1 (doubled); worst error {worst}");
+        // No heartbeat: the tap stops by itself.
+        std::thread::sleep(Duration::from_millis(2200));
+        let mut y = x.clone(); e.run(&mut y, false);
+        assert_eq!(tap_written(&mut f), after, "tap must stop when the settings window's heartbeat stops");
+        unsafe { std::env::remove_var("ProgramData"); }
+    }
+
     // The diagnostic tone shows up even on a silent mic.
     set_config(r#"{"stages":[{"type":"tone","freq":1000,"db":-20}]}"#);
     let mut y = vec![0f32; 2 * RATE as usize / 2];

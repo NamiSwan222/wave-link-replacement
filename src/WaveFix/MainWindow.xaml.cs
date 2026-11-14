@@ -653,6 +653,9 @@ public partial class MainWindow : Window
         {
             var psi = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
             psi.ArgumentList.Add("--edit-plugin"); psi.ArgumentList.Add(dll); psi.ArgumentList.Add(stateFile); psi.ArgumentList.Add(title);
+            // Where the plugin sits in the engine's chain, so its window gets the live audio entering it.
+            if (Mic.DeviceId is { } mic && WaveFixEngine.StageOf(_settings, dll) is int stage and > 0)
+            { psi.ArgumentList.Add(mic); psi.ArgumentList.Add(stage.ToString()); }
             proc = Process.Start(psi);
         }
         catch (Exception ex) { ShowPluginError($"Couldn't open the settings: {ex.Message}"); return; }

@@ -21,6 +21,8 @@ const EFF_SET_SAMPLE_RATE: i32 = 10;
 const EFF_SET_BLOCK_SIZE: i32 = 11;
 const EFF_MAINS_CHANGED: i32 = 12;
 const EFF_SET_CHUNK: i32 = 24;
+const EFF_START_PROCESS: i32 = 71;
+const EFF_STOP_PROCESS: i32 = 72;
 
 type Dispatcher = unsafe extern "C" fn(*mut c_void, i32, i32, isize, *mut c_void, f32) -> isize;
 type Process = unsafe extern "C" fn(*mut c_void, *const *const f32, *mut *mut f32, i32);
@@ -36,9 +38,72 @@ pub struct PluginState {
     pub params: Option<HashMap<String, f32>>,
 }
 
-extern "C" fn host_callback(_e: *mut c_void, opcode: i32, _i: i32, _v: isize, _p: *mut c_void, _o: f32) -> isize {
+/// VST 2.4 VstTimeInfo (what audioMasterGetTime returns). Some plugins crash on a null answer.
+#[repr(C)]
+struct VstTimeInfo {
+    sample_pos: f64, sample_rate: f64, nano_seconds: f64, ppq_pos: f64, tempo: f64,
+    bar_start_pos: f64, cycle_start_pos: f64, cycle_end_pos: f64,
+    time_sig_numerator: i32, time_sig_denominator: i32, smpte_offset: i32, smpte_frame_rate: i32,
+    samples_to_next_clock: i32, flags: i32,
+}
+
+/// Shared by every plugin instance in this process (all on the audio thread). A voice chain has
+/// no song position, so this is a steady clock: running, 120 BPM, 4/4.
+struct TimeCell(std::cell::UnsafeCell<VstTimeInfo>);
+unsafe impl Sync for TimeCell {}
+static TIME: TimeCell = TimeCell(std::cell::UnsafeCell::new(VstTimeInfo {
+    sample_pos: 0.0, sample_rate: 48_000.0, nano_seconds: 0.0, ppq_pos: 0.0, tempo: 120.0,
+    bar_start_pos: 0.0, cycle_start_pos: 0.0, cycle_end_pos: 0.0,
+    time_sig_numerator: 4, time_sig_denominator: 4, smpte_offset: 0, smpte_frame_rate: 0, samples_to_next_clock: 0,
+    // playing | ppq | tempo | bars | time signature valid
+    flags: 2 | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 13),
+}));
+static SAMPLE_RATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(48_000);
+static BLOCK_SIZE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(480);
+
+pub fn set_host_format(sr: f32, block: usize) {
+    use std::sync::atomic::Ordering::Relaxed;
+    SAMPLE_RATE.store(sr as u32, Relaxed);
+    BLOCK_SIZE.store(block as u32, Relaxed);
+}
+
+/// Moves the clock on by one block (called once per block by the chain).
+pub fn advance_time(frames: usize) {
+    let t = unsafe { &mut *TIME.0.get() };
+    let sr = SAMPLE_RATE.load(std::sync::atomic::Ordering::Relaxed).max(1) as f64;
+    t.sample_rate = sr;
+    t.sample_pos += frames as f64;
+    t.ppq_pos = t.sample_pos / sr * t.tempo / 60.0;
+    t.bar_start_pos = (t.ppq_pos / 4.0).floor() * 4.0;
+}
+
+fn write_cstr(ptr: *mut c_void, s: &str, max: usize) {
+    if ptr.is_null() { return; }
+    let b = s.as_bytes();
+    let n = b.len().min(max - 1);
+    unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), ptr as *mut u8, n); *(ptr as *mut u8).add(n) = 0; }
+}
+
+/// Answers plugins' questions the way a normal (if simple) host does.
+extern "C" fn host_callback(_e: *mut c_void, opcode: i32, _i: i32, _v: isize, ptr: *mut c_void, _o: f32) -> isize {
+    use std::sync::atomic::Ordering::Relaxed;
     match opcode {
-        1 => 2400, // audioMasterVersion
+        1 => 2400,                                         // audioMasterVersion
+        7 => TIME.0.get() as isize,                         // audioMasterGetTime
+        16 => SAMPLE_RATE.load(Relaxed) as isize,           // audioMasterGetSampleRate
+        17 => BLOCK_SIZE.load(Relaxed) as isize,            // audioMasterGetBlockSize
+        23 => 2,                                            // audioMasterGetCurrentProcessLevel: realtime
+        24 => 1,                                            // audioMasterGetAutomationState: off
+        32 => { write_cstr(ptr, "WaveFix", 64); 1 }         // audioMasterGetVendorString
+        33 => { write_cstr(ptr, "WaveFix Engine", 64); 1 }  // audioMasterGetProductString
+        34 => 1000,                                         // audioMasterGetVendorVersion
+        37 => {                                             // audioMasterCanDo
+            if ptr.is_null() { return 0; }
+            let s = unsafe { std::ffi::CStr::from_ptr(ptr as *const std::ffi::c_char) }.to_string_lossy();
+            if s == "sendVstTimeInfo" { 1 } else { -1 }
+        }
+        38 => 1,                                            // audioMasterGetLanguage: English
+        42 | 43 | 44 => 1,                                  // updateDisplay, beginEdit, endEdit
         _ => 0,
     }
 }
@@ -86,6 +151,7 @@ impl VstInstance {
 impl Drop for VstInstance {
     fn drop(&mut self) {
         unsafe {
+            (self.dispatch)(self.effect, EFF_STOP_PROCESS, 0, 0, std::ptr::null_mut(), 0.0);
             (self.dispatch)(self.effect, EFF_MAINS_CHANGED, 0, 0, std::ptr::null_mut(), 0.0);
             (self.dispatch)(self.effect, EFF_CLOSE, 0, 0, std::ptr::null_mut(), 0.0);
         }
@@ -169,7 +235,12 @@ fn open(main: Main, remaining: usize, sr: f32, max_frames: usize, state: &Plugin
             if let Some(v) = params.get(&name) { unsafe { set_param(effect, i, v.clamp(0.0, 1.0)); } }
         }
     }
-    unsafe { dispatch(effect, EFF_MAINS_CHANGED, 0, 1, std::ptr::null_mut(), 0.0); }
+    unsafe {
+        dispatch(effect, EFF_MAINS_CHANGED, 0, 1, std::ptr::null_mut(), 0.0);
+        // VST 2.4: tell the plugin audio is about to flow (some only output sound, or update their
+        // meters, after this).
+        dispatch(effect, EFF_START_PROCESS, 0, 0, std::ptr::null_mut(), 0.0);
+    }
 
     let channels = inputs.min(remaining).max(1);
     Ok(VstInstance {
