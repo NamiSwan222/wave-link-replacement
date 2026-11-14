@@ -46,6 +46,11 @@ public static class Setup
     const string RnnoiseUrl = "https://github.com/werman/noise-suppression-for-voice/releases/download/v1.10/win-rnnoise.zip";
     const string RnnoiseSha256 = "E4DCC186102850F8DCEBEB766AD1BF34C24F6280BD614EF84B72DAE4783FC517";
     const string RnnoiseEntry = "win-rnnoise/vst/rnnoise_mono.dll";
+    const string RnnoiseDllSha256 = "7DEBDFC4843461C47B23AC7A736B4663FE581643563AE764CDE395E006004080";
+    public const string RnnoiseReleasePage = "https://github.com/werman/noise-suppression-for-voice/releases/tag/v1.10";
+
+    /// <summary>The last setup run's log, kept so it can be copied and sent for help.</summary>
+    public static string LastLogPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WaveFix", "setup.log");
 
     const string EapoEfx = "{EC1CC9CE-FAED-4822-828A-82A81A6F018F}";
     const string EapoSfx = "{EACD2258-FCAC-4FF4-B36D-419E924A6D79}";
@@ -89,14 +94,16 @@ public static class Setup
     // ======================= Normal app: start the helper =======================
 
     /// <summary>Starts the admin helper (one UAC prompt) and reports "STEP n STATE message" lines.</summary>
-    public static async Task<bool> RunAsync(string endpointId, IProgress<(int step, string state, string message)> progress, CancellationToken ct = default)
+    public static async Task<bool> RunAsync(string endpointId, IProgress<(int step, string state, string message)> progress, string? localPlugin = null, CancellationToken ct = default)
     {
-        var log = Path.Combine(Path.GetTempPath(), $"wavefix-setup-{Guid.NewGuid():N}.log");
+        var log = LastLogPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
         File.WriteAllText(log, "");
+        var args = $"--setup {GuidOf(endpointId)} \"{log}\"" + (localPlugin != null ? $" \"{localPlugin}\"" : "");
         Process? p;
         try
         {
-            p = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--setup {GuidOf(endpointId)} \"{log}\"")
+            p = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, args)
             { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden });
         }
         catch (System.ComponentModel.Win32Exception) // UAC "No"
@@ -123,8 +130,7 @@ public static class Setup
             if (exited) break;
             await Task.Delay(400, ct);
         }
-        try { File.Delete(log); } catch { }
-        return ok;
+        return ok; // the log stays at LastLogPath for "Copy details"
     }
 
     // ======================= Admin helper (--setup) =======================
@@ -133,7 +139,7 @@ public static class Setup
     static void Log(string line) { _log?.WriteLine(line); _log?.Flush(); }
     static void Step(int n, string state, string msg = "") => Log($"STEP {n} {state} {msg}".TrimEnd());
 
-    public static int RunElevated(string micGuid, string logPath)
+    public static int RunElevated(string micGuid, string logPath, string? localPlugin = null)
     {
         using var w = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
         _log = w;
@@ -142,7 +148,8 @@ public static class Setup
             if (!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
                 throw new InvalidOperationException("The setup helper needs administrator rights.");
             Directory.CreateDirectory(WorkDir);
-            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+            Log($"LOG WaveFix {Updater.Current} setup, Windows {Environment.OSVersion.Version}, mic {micGuid}, local plugin: {localPlugin ?? "none"}");
+            using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan }; // our own watchdogs handle stalls
             http.DefaultRequestHeaders.UserAgent.ParseAdd($"WaveFix-Setup/{Updater.Current}");
             bool changed = false;
 
@@ -151,7 +158,7 @@ public static class Setup
             else
             {
                 Step(0, "RUN", "Downloading Equalizer APO…");
-                var exe = Download(http, EapoUrl, EapoSha256, "EqualizerAPO-x64-1.4.2.exe");
+                var exe = Download(http, EapoUrl, EapoSha256, "EqualizerAPO-x64-1.4.2.exe", 0, "Downloading Equalizer APO");
                 Step(0, "RUN", "Installing Equalizer APO…");
                 using (var inst = Process.Start(new ProcessStartInfo(exe, "/S") { UseShellExecute = false }))
                 {
@@ -175,12 +182,16 @@ public static class Setup
             if (File.Exists(NoisePlugin)) Step(1, "SKIP", "Already there");
             else
             {
-                Step(1, "RUN", "Downloading the noise removal plugin…");
-                var zip = Download(http, RnnoiseUrl, RnnoiseSha256, "win-rnnoise.zip");
-                using var archive = ZipFile.OpenRead(zip);
-                var entry = archive.GetEntry(RnnoiseEntry) ?? throw new InvalidOperationException("The plugin download is missing rnnoise_mono.dll.");
-                Directory.CreateDirectory(Path.GetDirectoryName(NoisePlugin)!);
-                entry.ExtractToFile(NoisePlugin, overwrite: true);
+                if (localPlugin != null)
+                {
+                    Step(1, "RUN", "Checking the file you picked…");
+                    InstallNoisePlugin(localPlugin);
+                }
+                else
+                {
+                    Step(1, "RUN", "Downloading the noise removal plugin…");
+                    InstallNoisePlugin(Download(http, RnnoiseUrl, RnnoiseSha256, "win-rnnoise.zip", 1, "Downloading the noise removal plugin"));
+                }
                 Step(1, "DONE", "Added");
                 changed = true;
             }
@@ -212,6 +223,7 @@ public static class Setup
         }
         catch (Exception ex)
         {
+            Log($"LOG {ex}");
             Log($"STEP -1 FAIL {ex.Message}");
             Log("RESULT FAIL");
             return 1;
@@ -219,16 +231,33 @@ public static class Setup
         finally { _log = null; try { Directory.Delete(WorkDir, true); } catch { } }
     }
 
-    static string Download(HttpClient http, string url, string sha256, string fileName)
+    /// <summary>
+    /// Downloads with live progress, a stall watchdog (no data for 30 s = drop and retry) and up to
+    /// three tries, then checks the SHA-256. HttpClient.Timeout doesn't cover reading the body once
+    /// headers arrived, so without the watchdog a stalled connection would hang setup forever.
+    /// </summary>
+    static string Download(HttpClient http, string url, string sha256, string fileName, int step, string label)
     {
         var path = Path.Combine(WorkDir, fileName); // admin-only folder: can't be swapped by other users
-        using (var resp = http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+        Exception? last = null;
+        for (int attempt = 1; attempt <= 3; attempt++)
         {
-            resp.EnsureSuccessStatusCode();
-            using var src = resp.Content.ReadAsStream();
-            using var dst = File.Create(path);
-            src.CopyTo(dst);
+            try
+            {
+                Task.Run(() => DownloadOnce(http, url, path, step, label, attempt)).GetAwaiter().GetResult();
+                last = null;
+                break;
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                Log($"LOG download try {attempt} failed: {ex.GetType().Name}: {ex.Message}");
+                if (attempt < 3) { Step(step, "RUN", $"Connection trouble, trying again ({attempt + 1} of 3)…"); Thread.Sleep(2000 * attempt); }
+            }
         }
+        if (last != null)
+            throw new InvalidOperationException($"Couldn't download {label.ToLowerInvariant()}: {Friendly(last)}");
+
         string actual;
         using (var fs = File.OpenRead(path)) actual = Convert.ToHexString(SHA256.HashData(fs));
         if (!actual.Equals(sha256, StringComparison.OrdinalIgnoreCase))
@@ -237,6 +266,79 @@ public static class Setup
             throw new InvalidOperationException($"{fileName} didn't match its expected fingerprint, so it wasn't used.");
         }
         return path;
+    }
+
+    static async Task DownloadOnce(HttpClient http, string url, string path, int step, string label, int attempt)
+    {
+        using var overall = new CancellationTokenSource(TimeSpan.FromMinutes(15));
+        using var stall = CancellationTokenSource.CreateLinkedTokenSource(overall.Token);
+        stall.CancelAfter(TimeSpan.FromSeconds(30));
+        using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, stall.Token);
+        resp.EnsureSuccessStatusCode();
+        long total = resp.Content.Headers.ContentLength ?? 0;
+        await using var src = await resp.Content.ReadAsStreamAsync(stall.Token);
+        await using var dst = File.Create(path);
+        var buf = new byte[1 << 16];
+        long done = 0; var lastReport = DateTime.MinValue;
+        string tryText = attempt > 1 ? $" (try {attempt} of 3)" : "";
+        while (true)
+        {
+            stall.CancelAfter(TimeSpan.FromSeconds(30)); // reset the watchdog for every chunk
+            int n;
+            try { n = await src.ReadAsync(buf, stall.Token); }
+            catch (OperationCanceledException) when (!overall.IsCancellationRequested)
+            { throw new System.TimeoutException("the download stopped receiving data for 30 seconds"); }
+            if (n == 0) break;
+            await dst.WriteAsync(buf.AsMemory(0, n), overall.Token);
+            done += n;
+            if (DateTime.Now - lastReport > TimeSpan.FromMilliseconds(700))
+            {
+                lastReport = DateTime.Now;
+                Step(step, "RUN", total > 0
+                    ? $"{label}… {done / 1048576.0:0.0} of {total / 1048576.0:0.0} MB{tryText}"
+                    : $"{label}… {done / 1048576.0:0.0} MB{tryText}");
+            }
+        }
+        if (total > 0 && done != total) throw new IOException($"the download ended early ({done} of {total} bytes)");
+    }
+
+    static string Friendly(Exception ex) => ex switch
+    {
+        System.TimeoutException t => t.Message + ". Your internet connection, a VPN or antivirus may be interrupting it",
+        HttpRequestException h when h.StatusCode != null => $"the server answered {(int)h.StatusCode} {h.StatusCode}",
+        HttpRequestException => "couldn't reach the website. Check your internet connection, VPN or firewall",
+        TaskCanceledException => "it took too long",
+        _ => ex.Message,
+    };
+
+    /// <summary>
+    /// Puts rnnoise_mono.dll in place from a zip or dll (downloaded or user-picked). Whatever the
+    /// source, the DLL itself must match its pinned SHA-256.
+    /// </summary>
+    static void InstallNoisePlugin(string source)
+    {
+        var staged = Path.Combine(WorkDir, "rnnoise_mono.dll");
+        if (source.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            var copy = Path.Combine(WorkDir, "picked.zip");
+            if (!string.Equals(source, copy, StringComparison.OrdinalIgnoreCase)) File.Copy(source, copy, true);
+            using var archive = ZipFile.OpenRead(copy);
+            var entry = archive.GetEntry(RnnoiseEntry)
+                        ?? archive.Entries.FirstOrDefault(e => e.FullName.Replace('\\', '/').EndsWith("/vst/rnnoise_mono.dll", StringComparison.OrdinalIgnoreCase))
+                        ?? throw new InvalidOperationException("That zip doesn't contain the noise removal plugin (vst/rnnoise_mono.dll). Use win-rnnoise.zip from the RNNoise v1.10 release.");
+            entry.ExtractToFile(staged, overwrite: true);
+        }
+        else File.Copy(source, staged, true); // copy first so the checked file is the one we install
+
+        string actual;
+        using (var fs = File.OpenRead(staged)) actual = Convert.ToHexString(SHA256.HashData(fs));
+        if (!actual.Equals(RnnoiseDllSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("That plugin file isn't the expected RNNoise v1.10 version, so it wasn't used.");
+
+        Directory.CreateDirectory(Path.GetDirectoryName(NoisePlugin)!);
+        try { File.Copy(staged, NoisePlugin, overwrite: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { throw new InvalidOperationException($"Couldn't copy the plugin into Equalizer APO's folder ({ex.Message}). Antivirus may be blocking it."); }
     }
 
     /// <summary>

@@ -110,7 +110,32 @@
                             </ItemsControl>
 
                             <Border x:Name="SetupResult" CornerRadius="12" Padding="14,12" Margin="0,4,0,16" Visibility="Collapsed">
-                                <TextBlock x:Name="SetupResultText" Style="{StaticResource Hint}" Foreground="{StaticResource Text}" FontSize="13"/>
+                                <StackPanel>
+                                    <TextBlock x:Name="SetupResultText" Style="{StaticResource Hint}" Foreground="{StaticResource Text}" FontSize="13"/>
+                                    <WrapPanel x:Name="SetupHelp" Margin="0,10,0,0" Visibility="Collapsed">
+                                        <Button x:Name="PickPluginButton" Style="{StaticResource SoftButton}" Height="36" Padding="12,0" Margin="0,0,8,6" Click="PickPlugin_Click"
+                                                AutomationProperties.Name="Use a plugin file I downloaded">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE8E5;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,8,0"/>
+                                                <TextBlock Text="Use a file I downloaded…" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+                                        <Button x:Name="OpenPluginPageButton" Style="{StaticResource SoftButton}" Height="36" Padding="12,0" Margin="0,0,8,6" Click="OpenPluginPage_Click"
+                                                AutomationProperties.Name="Open the plugin download page">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE774;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,8,0"/>
+                                                <TextBlock Text="Open the download page" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Style="{StaticResource SoftButton}" Height="36" Padding="12,0" Margin="0,0,8,6" Click="CopySetupLog_Click"
+                                                AutomationProperties.Name="Copy setup details">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE8C8;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,8,0"/>
+                                                <TextBlock x:Name="CopyLogText" Text="Copy details" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+                                    </WrapPanel>
+                                </StackPanel>
                             </Border>
 
                             <StackPanel Orientation="Horizontal">

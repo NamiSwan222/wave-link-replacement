@@ -286,7 +286,9 @@ public partial class MainWindow : Window
         SetupButton.IsEnabled = !complete;
     }
 
-    async void RunSetup_Click(object sender, RoutedEventArgs e)
+    void RunSetup_Click(object sender, RoutedEventArgs e) => _ = RunSetup(null);
+
+    async Task RunSetup(string? localPlugin)
     {
         if (_setupRunning || Mic.DeviceId == null) return;
         var micId = Mic.DeviceId;
@@ -295,6 +297,7 @@ public partial class MainWindow : Window
         SetupButtonText.Text = "Setting up…";
         SetupResult.Visibility = Visibility.Collapsed;
         foreach (var s in _setupSteps) if (s.State != "DONE") { s.State = "WAIT"; }
+        int failedStep = -1;
 
         var progress = new Progress<(int step, string state, string message)>(p =>
         {
@@ -302,16 +305,21 @@ public partial class MainWindow : Window
             {
                 _setupSteps[p.step].State = p.state;
                 _setupSteps[p.step].Message = p.state == "SKIP" ? "Already done" : p.message;
+                if (p.state == "FAIL") failedStep = p.step;
             }
             else if (p.state == "FAIL")
             {
-                foreach (var s in _setupSteps.Where(s => s.State == "RUN")) { s.State = "FAIL"; s.Message = "Didn't finish"; }
-                ShowSetupResult(false, p.message);
+                foreach (var s in _setupSteps.Where(s => s.State == "RUN"))
+                {
+                    failedStep = _setupSteps.IndexOf(s);
+                    s.State = "FAIL"; s.Message = "Didn't finish";
+                }
+                ShowSetupResult(false, p.message, showHelp: true, pluginHelp: failedStep == 1);
             }
         });
 
         bool ok;
-        try { ok = await Setup.RunAsync(micId, progress); }
+        try { ok = await Setup.RunAsync(micId, progress, localPlugin); }
         catch (Exception ex) { ok = false; ShowSetupResult(false, ex.Message); }
         _setupRunning = false;
         _setupShowsResult = ok;
@@ -327,15 +335,47 @@ public partial class MainWindow : Window
         else
         {
             if (SetupResult.Visibility != Visibility.Visible)
-                ShowSetupResult(false, "Setup didn't finish. Nothing harmful was left half-done; you can try again.");
+                ShowSetupResult(false, "Setup didn't finish. Nothing harmful was left half-done; you can try again.", showHelp: true, pluginHelp: false);
             SetupButtonText.Text = "Try again";
             SetupButton.IsEnabled = true;
         }
         UpdateStatus();
     }
 
-    void ShowSetupResult(bool good, string text)
+    void PickPlugin_Click(object sender, RoutedEventArgs e)
     {
+        var dlg = new OpenFileDialog
+        {
+            Title = "Pick win-rnnoise.zip (or rnnoise_mono.dll) that you downloaded",
+            Filter = "RNNoise download (*.zip;*.dll)|*.zip;*.dll|All files (*.*)|*.*",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "\\Downloads",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        _ = RunSetup(dlg.FileName);
+    }
+
+    void OpenPluginPage_Click(object sender, RoutedEventArgs e) =>
+        Process.Start(new ProcessStartInfo(Setup.RnnoiseReleasePage) { UseShellExecute = true });
+
+    void CopySetupLog_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var text = System.IO.File.Exists(Setup.LastLogPath) ? System.IO.File.ReadAllText(Setup.LastLogPath) : "(no setup log)";
+            Clipboard.SetText($"WaveFix {Updater.Current} setup log\n{text}");
+            CopyLogText.Text = "Copied!";
+        }
+        catch { CopyLogText.Text = "Couldn't copy"; }
+    }
+
+    void ShowSetupResult(bool good, string text, bool showHelp = false, bool pluginHelp = false)
+    {
+        SetupHelp.Visibility = showHelp ? Visibility.Visible : Visibility.Collapsed;
+        PickPluginButton.Visibility = pluginHelp ? Visibility.Visible : Visibility.Collapsed;
+        OpenPluginPageButton.Visibility = pluginHelp ? Visibility.Visible : Visibility.Collapsed;
+        CopyLogText.Text = "Copy details";
+        if (pluginHelp)
+            text += "\n\nYou can also get it yourself: open the download page, download win-rnnoise.zip, then click Use a file I downloaded and pick it.";
         SetupResult.Visibility = Visibility.Visible;
         SetupResult.Background = (Brush)FindResource(good ? "GoodSoft" : "BadSoft");
         SetupResultText.Text = text;
