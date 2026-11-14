@@ -219,8 +219,8 @@ public partial class MainWindow : Window
     {
         bool needsSetup = Mic.DeviceId != null && !Setup.IsComplete(Mic.DeviceId);
         BannerAction.Visibility = needsSetup && !_setupRunning ? Visibility.Visible : Visibility.Collapsed;
-        if (!needsSetup && NavSetup.IsChecked != true) NavSetup.Visibility = Visibility.Collapsed;
-        if (needsSetup) NavSetup.Visibility = Visibility.Visible;
+        // Always reachable: it also holds "Copy details for help" and "Take the engine off this mic".
+        NavSetup.Visibility = Visibility.Visible;
         if (!_setupRunning) RefreshSetupChecklist();
 
         if (Mic.DeviceId == null)

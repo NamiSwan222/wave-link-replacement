@@ -28,6 +28,9 @@ pub enum Stage {
     Gain { db: f32 },
     /// WaveFix's own effects (voice polish, voice changer, soundboard, limiter), by parameter name.
     Fx { #[serde(default)] params: HashMap<String, f32> },
+    /// Diagnostics: adds a sine tone (so a test can hear that the engine processes the mic, even
+    /// a silent one). Not used by the app's normal settings.
+    Tone { freq: f32, #[serde(default = "default_tone_db")] db: f32 },
     /// A VST2 plugin from WaveFix's protected plugin folder.
     Vst {
         path: String,
@@ -35,6 +38,8 @@ pub enum Stage {
         #[serde(default)] params: Option<HashMap<String, f32>>,
     },
 }
+
+fn default_tone_db() -> f32 { -20.0 }
 
 impl Config {
     pub fn parse(text: &str) -> Result<Config, String> {
@@ -91,6 +96,8 @@ enum Processor {
     Fx(Vec<Dsp>, Box<[f32; COUNT]>),
     /// Plugin instances covering all channels (a mono plugin gets one instance per channel).
     Vst(Vec<VstInstance>),
+    /// Test tone: phase, phase step per sample, amplitude.
+    Tone(f32, f32, f32),
 }
 
 /// A built chain for one channel count and sample rate.
@@ -117,6 +124,7 @@ impl Chain {
                     None => warnings.push(format!("unknown filter type {kind}")),
                 },
                 Stage::Gain { db } => procs.push(Processor::Gain(10f32.powf(db.clamp(-60.0, 40.0) / 20.0))),
+                Stage::Tone { freq, db } => procs.push(Processor::Tone(0.0, 2.0 * PI * freq.clamp(20.0, 20_000.0) / sr, 10f32.powf(db.clamp(-80.0, -6.0) / 20.0))),
                 Stage::Fx { params } => {
                     let mut norm: [f32; COUNT] = std::array::from_fn(|i| PARAMS[i].default_norm());
                     for (i, prm) in PARAMS.iter().enumerate() {
@@ -178,6 +186,14 @@ impl Chain {
                 }
                 Processor::Fx(dsps, norm) => {
                     for (d, plane) in dsps.iter_mut().zip(self.planes.iter_mut()) { d.process(norm, &mut plane[..n]); }
+                }
+                Processor::Tone(phase, step, amp) => {
+                    for f in 0..n {
+                        let v = phase.sin() * *amp;
+                        *phase += *step;
+                        if *phase > 2.0 * PI { *phase -= 2.0 * PI; }
+                        for plane in self.planes.iter_mut() { plane[f] += v; }
+                    }
                 }
                 Processor::Vst(instances) => {
                     let mut first = 0;

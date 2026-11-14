@@ -65,7 +65,7 @@
                 </StackPanel>
 
                 <StackPanel>
-                    <RadioButton x:Name="NavSetup" Style="{StaticResource NavItem}" GroupName="nav" Content="Setup" Tag="&#xE713;" Checked="Nav_Checked" Visibility="Collapsed"/>
+                    <RadioButton x:Name="NavSetup" Style="{StaticResource NavItem}" GroupName="nav" Content="Setup" Tag="&#xE713;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavMic" Style="{StaticResource NavItem}" GroupName="nav" Content="Microphone" Tag="&#xE720;" IsChecked="True" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavVoice" Style="{StaticResource NavItem}" GroupName="nav" Content="Voice changer" Tag="&#xE8D6;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavSoundboard" Style="{StaticResource NavItem}" GroupName="nav" Content="Soundboard" Tag="&#xE7F6;" Checked="Nav_Checked"/>

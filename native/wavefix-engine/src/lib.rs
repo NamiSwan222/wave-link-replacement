@@ -9,6 +9,7 @@
 //! Written from Microsoft's documented APO interfaces. Equalizer APO (GPL) was a reference for how
 //! the pieces fit, not a source of code.
 
+pub mod aggregate;
 pub mod apo;
 pub mod chain;
 pub mod diag;
@@ -96,7 +97,14 @@ impl IClassFactory_Impl for Factory_Impl {
     fn CreateInstance(&self, outer: Ref<IUnknown>, riid: *const GUID, ppv: *mut *mut c_void) -> Result<()> {
         if ppv.is_null() || riid.is_null() { return Err(E_POINTER.into()); }
         unsafe { *ppv = std::ptr::null_mut(); }
-        if outer.is_some() { return Err(CLASS_E_NOAGGREGATION.into()); }
+        if let Some(outer) = outer.as_ref() {
+            // Windows' audio service always creates effects this way: inside an outer object of
+            // its own, asking for our inner IUnknown (COM's rule for aggregation).
+            if unsafe { *riid } != IUnknown::IID { return Err(CLASS_E_NOAGGREGATION.into()); }
+            let inner = aggregate::create_aggregated(outer.as_raw()).inspect_err(|e| diag::error(&format!("Couldn't create the engine: {e}")))?;
+            unsafe { *ppv = inner; }
+            return Ok(());
+        }
         let unknown: IUnknown = apo::Apo::new().into();
         unsafe { unknown.query(riid, ppv).ok() }
     }

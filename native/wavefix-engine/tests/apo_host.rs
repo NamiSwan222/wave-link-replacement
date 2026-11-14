@@ -12,7 +12,9 @@ use windows::Win32::Media::KernelStreaming::{KSDATAFORMAT_SUBTYPE_PCM, WAVE_FORM
 use windows::Win32::Media::Multimedia::KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
 use windows::Win32::System::Com::IClassFactory;
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows::core::{implement, Interface, Ref, Result, BOOL, GUID, HRESULT, HSTRING, PCSTR};
+use windows::core::{implement, IUnknown, IUnknown_Vtbl, Interface, Ref, Result, BOOL, GUID, HRESULT, HSTRING, PCSTR};
+use windows::Win32::Foundation::CLASS_E_NOAGGREGATION;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 const CLSID: GUID = GUID::from_u128(0x1F0E0A0C_41EE_4E1A_B2C4_0681D5344BDD);
 const RATE: u32 = 48_000;
@@ -69,7 +71,24 @@ fn dll_path() -> PathBuf {
 
 struct Engine { apo: IAudioProcessingObject, rt: IAudioProcessingObjectRT, cfg: IAudioProcessingObjectConfiguration, channels: usize }
 
-fn create() -> IAudioProcessingObject {
+/// The "outer" object Windows' audio service wraps every effect in (COM aggregation). It answers
+/// IUnknown itself and passes every other request to the engine's inner IUnknown.
+#[repr(C)]
+struct Outer { vtbl: *const IUnknown_Vtbl, refs: AtomicU32, inner: *mut c_void }
+
+unsafe extern "system" fn outer_qi(this: *mut c_void, iid: *const GUID, out: *mut *mut c_void) -> HRESULT {
+    unsafe {
+        let o = &*(this as *const Outer);
+        if *iid == IUnknown::IID { o.refs.fetch_add(1, Ordering::SeqCst); *out = this; return HRESULT(0); }
+        let inner_vt = &**(o.inner as *const *const IUnknown_Vtbl);
+        (inner_vt.QueryInterface)(o.inner, iid, out)
+    }
+}
+unsafe extern "system" fn outer_addref(this: *mut c_void) -> u32 { unsafe { (*(this as *const Outer)).refs.fetch_add(1, Ordering::SeqCst) + 1 } }
+unsafe extern "system" fn outer_release(this: *mut c_void) -> u32 { unsafe { (*(this as *const Outer)).refs.fetch_sub(1, Ordering::SeqCst) - 1 } }
+static OUTER_VTBL: IUnknown_Vtbl = IUnknown_Vtbl { QueryInterface: outer_qi, AddRef: outer_addref, Release: outer_release };
+
+fn factory() -> IClassFactory {
     let dll = dll_path();
     assert!(dll.is_file(), "build the DLL first: {}", dll.display());
     unsafe {
@@ -78,8 +97,30 @@ fn create() -> IAudioProcessingObject {
         let get: extern "system" fn(*const GUID, *const GUID, *mut *mut c_void) -> HRESULT = std::mem::transmute(get);
         let mut factory: *mut c_void = std::ptr::null_mut();
         get(&CLSID, &IClassFactory::IID, &mut factory).ok().expect("class factory");
-        let factory = IClassFactory::from_raw(factory);
-        factory.CreateInstance::<_, IAudioProcessingObject>(None::<&windows::core::IUnknown>).expect("create APO")
+        IClassFactory::from_raw(factory)
+    }
+}
+
+/// Creates the engine exactly like Windows' audio service: aggregated in an outer object.
+fn create() -> IAudioProcessingObject {
+    let f = factory();
+    unsafe {
+        let outer = Box::leak(Box::new(Outer { vtbl: &OUTER_VTBL, refs: AtomicU32::new(1), inner: std::ptr::null_mut() }));
+        let outer_ptr = outer as *mut Outer as *mut c_void;
+        // Asking for anything but IUnknown while aggregating must be refused (COM's rule).
+        let mut bad: *mut c_void = std::ptr::null_mut();
+        let hr = (f.vtable().CreateInstance)(f.as_raw(), outer_ptr, &IAudioProcessingObject::IID, &mut bad);
+        assert_eq!(hr, CLASS_E_NOAGGREGATION, "aggregation must ask for IUnknown");
+        let mut inner: *mut c_void = std::ptr::null_mut();
+        let hr = (f.vtable().CreateInstance)(f.as_raw(), outer_ptr, &IUnknown::IID, &mut inner);
+        assert_eq!(hr, HRESULT(0), "aggregated creation failed: {hr:?}");
+        outer.inner = inner;
+        // The outer object hands out the engine's interfaces; their reference counts go to it.
+        let before = outer.refs.load(Ordering::SeqCst);
+        let mut p: *mut c_void = std::ptr::null_mut();
+        outer_qi(outer_ptr, &IAudioProcessingObject::IID, &mut p).ok().expect("engine interface through the outer object");
+        assert_eq!(outer.refs.load(Ordering::SeqCst), before + 1, "AddRef must go to the outer object");
+        IAudioProcessingObject::from_raw(p)
     }
 }
 
@@ -170,6 +211,10 @@ fn engine_behaves_like_a_windows_audio_effect() {
     unsafe { std::env::set_var("WAVEFIX_ENGINE_DATA", data_dir()); }
     let _ = std::fs::remove_file(data_dir().join("config").join("default.json"));
 
+    // Plain (non-aggregated) creation still works too.
+    let plain: IAudioProcessingObject = unsafe { factory().CreateInstance::<_, IAudioProcessingObject>(None::<&IUnknown>) }.expect("plain creation");
+    drop(plain);
+
     // Registration properties match what setup registers.
     let apo = create();
     let props = unsafe { &*apo.GetRegistrationProperties().unwrap() };
@@ -242,6 +287,13 @@ fn engine_behaves_like_a_windows_audio_effect() {
     let status = std::fs::read_to_string(data_dir().join("status").join("default.json")).expect("status file");
     assert!(status.contains("not in WaveFix's plugin folder"), "status should explain: {status}");
     assert!(status.contains("\"channels\":2"));
+
+    // The diagnostic tone shows up even on a silent mic.
+    set_config(r#"{"stages":[{"type":"tone","freq":1000,"db":-20}]}"#);
+    let mut y = vec![0f32; 2 * RATE as usize / 2];
+    e.run(&mut y, true);
+    let peak = y.iter().fold(0f32, |m, v| m.max(v.abs()));
+    assert!((peak - 0.1).abs() < 0.01, "tone peak {peak}");
 
     // A broken config doesn't break the audio.
     set_config("{ this is not json");
