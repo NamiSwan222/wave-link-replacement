@@ -35,6 +35,7 @@ jobs:
       - name: Test audio engine
         run: |
           cargo build --release --manifest-path native/wavefix-fx/Cargo.toml
+          cargo build --release --manifest-path native/wavefix-engine/Cargo.toml
           cargo test --release --manifest-path native/wavefix-engine/Cargo.toml
 
       - name: Publish app (self-contained, single file)
