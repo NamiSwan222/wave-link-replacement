@@ -37,7 +37,11 @@ public static class VoiceFx
         }
     }
 
-    public static bool Available => InstalledPath != null;
+    /// <summary>
+    /// This build includes WaveFix's effects. Only checks the exe: the copy in ProgramData is only
+    /// made when Equalizer APO needs it (WaveFix's own engine has the effects built in).
+    /// </summary>
+    public static bool Available => typeof(VoiceFx).Assembly.GetManifestResourceInfo(ResourceName) != null;
 
     static string? Install()
     {
@@ -78,7 +82,7 @@ public static class VoiceFx
         EchoMix = new("EchoMix", 0, 1), EchoTime = new("EchoTime", 20, 1000), EchoFeedback = new("EchoFeedback", 0, 0.9),
         VerbMix = new("VerbMix", 0, 1), VerbSize = new("VerbSize", 0, 1);
     public static readonly Param LimOn = new("LimOn", 0, 1), LimCeiling = new("LimCeiling", -24, 0);
-    public static readonly Param SbOn = new("SbOn", 0, 1);
+    public static readonly Param SbOn = new("SbOn", 0, 1), RvcOn = new("RvcOn", 0, 1), RvcMute = new("RvcMute", 0, 1);
 
     /// <summary>Every parameter in the plugin's order (used to check the plugin matches this table).</summary>
     public static readonly Param[] All =
@@ -86,7 +90,7 @@ public static class VoiceFx
         ExpOn, ExpThresh, ExpRatio, DeEssOn, DeEssFreq, DeEssThresh, DeEssRange,
         CompOn, CompThresh, CompRatio, CompAttack, CompRelease, CompMakeup,
         VoiceOn, Pitch, RobotMix, RobotFreq, Wobble, WobbleRate, Drive, LowCut, HighCut,
-        EchoMix, EchoTime, EchoFeedback, VerbMix, VerbSize, LimOn, LimCeiling, SbOn,
+        EchoMix, EchoTime, EchoFeedback, VerbMix, VerbSize, LimOn, LimCeiling, SbOn, RvcOn, RvcMute,
     };
 
     sealed class Builder
@@ -104,9 +108,15 @@ public static class VoiceFx
     /// Config line for the main instance (expander, de-esser, leveler, voice changer), or null
     /// when none of them is on. It runs after the tone and the user's plugins, before mic boost.
     /// </summary>
-    public static string? MainLine(PolishSettings polish, VoiceSettings voice)
+    public static string? MainLine(PolishSettings polish, VoiceSettings voice) =>
+        MainParams(polish, voice) is { } p && InstalledPath is { } dll ? PluginState.ConfigLine(dll, new PluginState { Params = p }) : null;
+
+    /// <summary>
+    /// Settings (name -> 0..1) for the main instance, or null when none of its effects is on. Used
+    /// as an Equalizer APO plugin line, or directly by the WaveFix engine.
+    /// </summary>
+    public static Dictionary<string, float>? MainParams(PolishSettings polish, VoiceSettings voice)
     {
-        if (InstalledPath is not { } dll) return null;
         var b = new Builder();
         bool any = false;
         if (polish.Silencer)
@@ -139,20 +149,24 @@ public static class VoiceFx
              .Set(EchoMix, voice.Echo / 100).Set(EchoTime, voice.EchoTime).Set(EchoFeedback, voice.EchoFeedback)
              .Set(VerbMix, voice.Room / 100).Set(VerbSize, voice.RoomSize);
         }
-        return any ? PluginState.ConfigLine(dll, new PluginState { Params = b.Map }) : null;
+        return any ? b.Map : null;
     }
 
     /// <summary>
     /// Config line for the last instance (after mic boost), or null: the soundboard is mixed in
     /// there (so the voice changer doesn't pitch it), then peak protection.
     /// </summary>
-    public static string? OutputLine(PolishSettings polish, SoundboardSettings soundboard)
+    public static string? OutputLine(PolishSettings polish, SoundboardSettings soundboard) =>
+        OutputParams(polish, soundboard) is { } p && InstalledPath is { } dll ? PluginState.ConfigLine(dll, new PluginState { Params = p }) : null;
+
+    /// <summary>Settings for the last instance (soundboard, peak protection), or null when both are off.</summary>
+    public static Dictionary<string, float>? OutputParams(PolishSettings polish, SoundboardSettings soundboard)
     {
-        if (!polish.Limiter && !soundboard.Enabled || InstalledPath is not { } dll) return null;
+        if (!polish.Limiter && !soundboard.Enabled) return null;
         var b = new Builder();
         if (soundboard.Enabled) b.On(SbOn);
         if (polish.Limiter) b.On(LimOn).Set(LimCeiling, polish.LimiterCeilingDb);
-        return PluginState.ConfigLine(dll, new PluginState { Params = b.Map });
+        return b.Map;
     }
 }
 

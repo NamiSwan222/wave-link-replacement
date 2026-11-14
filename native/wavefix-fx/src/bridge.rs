@@ -10,21 +10,28 @@
 //! thread left running in an unloaded DLL would crash the audio engine. Attaching happens on
 //! the host's non-real-time calls, plus a rare retry from the audio thread.
 //!
-//! Layout (little endian; must match src/WaveFix/Audio/Bridge.cs):
-//!   0  u32 magic 'WFBR'          4  u32 version (1)
+//! Layout (little endian; must match src/WaveFix/Audio/Soundboard.cs, AudioBridge):
+//!   0  u32 magic 'WFBR'          4  u32 version (2)
 //!   8  u32 plugin sample rate    12 u32 ring length (samples, power of two)
-//!   16 u64 consumer position (absolute sample index where the plugin's current block starts)
-//!   24 u64 write position (the app has written samples up to here, exclusive)
+//!   16 u64 soundboard consumer (absolute sample index where the plugin's current block starts)
+//!   24 u64 soundboard write position (the app has written samples up to here, exclusive)
 //!   32 u64 plugin heartbeat (GetTickCount64 ms)
 //!   40 u64 app heartbeat
-//!   64 f32 ring[ring length]
+//!   AI voice (RVC), on its own timeline:
+//!   48 u64 RVC clock (where the plugin's current block starts)
+//!   56 u64 RVC input written (the plugin has written the voice up to here)
+//!   64 u64 RVC output written (the engine has written converted voice up to here)
+//!   72 u64 RVC engine heartbeat
+//!   80 u32 RVC delay in samples (output for position p is played at p + delay)
+//!   128 f32 soundboard ring, then RVC input ring, then RVC output ring (each ring length)
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU64, Ordering};
 
 pub const MAGIC: u32 = 0x5242_4657; // "WFBR"
-pub const VERSION: u32 = 1;
-pub const HEADER: usize = 64;
+pub const VERSION: u32 = 2;
+pub const HEADER: usize = 128;
+const RINGS: i64 = 3;
 const MAX_RING: u32 = 1 << 22;
 
 #[allow(non_snake_case)]
@@ -70,7 +77,7 @@ pub fn attach() -> Option<&'static Header> {
         if file == INVALID_HANDLE || file.is_null() { return None; }
         let mut size = 0i64;
         let ok = GetFileSizeEx(file, &mut size) != 0;
-        if !ok || size < (HEADER + 4096) as i64 || size > (HEADER as i64 + 4 * MAX_RING as i64) { CloseHandle(file); return None; }
+        if !ok || size < (HEADER + 4096) as i64 || size > (HEADER as i64 + RINGS * 4 * MAX_RING as i64) { CloseHandle(file); return None; }
         let mapping = CreateFileMappingW(file, std::ptr::null_mut(), PAGE_READWRITE, 0, 0, std::ptr::null());
         CloseHandle(file);
         if mapping.is_null() { return None; }
@@ -80,7 +87,7 @@ pub fn attach() -> Option<&'static Header> {
         let h = &*(view as *const Header);
         let len = h.ring_len.load(Ordering::Acquire);
         if h.magic.load(Ordering::Acquire) != MAGIC || h.version.load(Ordering::Acquire) != VERSION
-            || !len.is_power_of_two() || len > MAX_RING || (HEADER as i64 + 4 * len as i64) > size
+            || !len.is_power_of_two() || len > MAX_RING || (HEADER as i64 + RINGS * 4 * len as i64) > size
         {
             UnmapViewOfFile(view as *const c_void); // not ready, or another version: retry later
             return None;
@@ -116,10 +123,18 @@ pub struct Header {
     pub write: AtomicU64,
     pub plugin_beat: AtomicU64,
     pub app_beat: AtomicU64,
+    pub rvc_clock: AtomicU64,
+    pub rvc_in_write: AtomicU64,
+    pub rvc_out_write: AtomicU64,
+    pub rvc_engine_beat: AtomicU64,
+    pub rvc_delay: AtomicU32,
 }
 
+/// Bytes of shared memory needed for a ring length (header + three rings).
+pub const fn bytes_for(ring_len: u32) -> usize { HEADER + 3 * 4 * ring_len as usize }
+
 impl Header {
-    /// Sets up a header in caller-owned memory of at least HEADER + 4 * ring_len bytes, 8-aligned
+    /// Sets up a header in caller-owned memory of at least `bytes_for(ring_len)` bytes, 8-aligned
     /// (the app does the same from C#; tests use this).
     ///
     /// # Safety
@@ -142,9 +157,26 @@ impl Header {
         self.write.store(start + data.len() as u64, Ordering::Release);
     }
 
-    fn ring(&self) -> (*const f32, u64) {
+    fn ring(&self) -> (*const f32, u64) { self.ring_n(0) }
+
+    /// Ring 0 = soundboard, 1 = RVC input, 2 = RVC output.
+    fn ring_n(&self, n: usize) -> (*const f32, u64) {
         let len = self.ring_len.load(Ordering::Relaxed) as u64;
-        (unsafe { (self as *const Header as *const u8).add(HEADER) as *const f32 }, len)
+        (unsafe { (self as *const Header as *const u8).add(HEADER + n * 4 * len as usize) as *const f32 }, len)
+    }
+
+    /// Test helper standing in for the app's RVC engine: reads the voice the plugin sent for
+    /// [start, end) and writes `f(sample)` back as the converted voice.
+    pub fn engine_convert(&self, start: u64, end: u64, delay: u32, f: impl Fn(f32) -> f32) {
+        let (inp, len) = self.ring_n(1);
+        let (out, _) = self.ring_n(2);
+        let mask = len - 1;
+        for pos in start..end {
+            unsafe { *(out as *mut f32).add((pos & mask) as usize) = f(*inp.add((pos & mask) as usize)); }
+        }
+        self.rvc_delay.store(delay, Ordering::Relaxed);
+        self.rvc_out_write.store(end, Ordering::Release);
+        self.rvc_engine_beat.store(now_ms(), Ordering::Relaxed);
     }
 }
 
@@ -178,5 +210,65 @@ impl Reader {
             }
         }
         self.cursor += buf.len() as u64;
+    }
+}
+
+/// One plugin instance's link to the AI voice engine. It writes the voice into the input ring
+/// and plays the converted voice from the output ring `delay` samples later. When the engine
+/// isn't keeping up (or isn't running) it fades to the real voice, or to silence if asked.
+#[derive(Default)]
+pub struct RvcLink { cursor: u64, started: bool, wet: f32 }
+
+impl RvcLink {
+    pub fn process(&mut self, h: Option<&Header>, sr: f32, buf: &mut [f32], mute_fallback: bool) {
+        let step = 1.0 / (0.03 * sr).max(1.0); // 30 ms fades
+        let Some(h) = h else {
+            self.fade(buf, None, 0, 0, 0.0, step, mute_fallback);
+            return;
+        };
+        h.rate.store(sr as u32, Ordering::Relaxed);
+        h.plugin_beat.store(now_ms(), Ordering::Relaxed);
+        let (inp, len) = h.ring_n(1);
+        let clock = h.rvc_clock.load(Ordering::Acquire);
+        if !self.started || self.cursor + len < clock || self.cursor > clock + len {
+            self.cursor = clock;
+            self.started = true;
+        }
+        h.rvc_clock.fetch_max(self.cursor, Ordering::AcqRel);
+        let mask = len - 1;
+        let n = buf.len() as u64;
+        for (i, s) in buf.iter().enumerate() {
+            unsafe { *(inp as *mut f32).add(((self.cursor + i as u64) & mask) as usize) = *s; }
+        }
+        h.rvc_in_write.fetch_max(self.cursor + n, Ordering::AcqRel);
+
+        // The whole block must be there for the AI voice to play; otherwise fade out of it.
+        let delay = h.rvc_delay.load(Ordering::Relaxed) as u64;
+        let out_written = h.rvc_out_write.load(Ordering::Acquire);
+        let alive = now_ms().saturating_sub(h.rvc_engine_beat.load(Ordering::Relaxed)) < 500;
+        let first = self.cursor.wrapping_sub(delay);
+        let ready = alive && delay > 0 && delay < len && self.cursor >= delay
+            && first + n <= out_written && first + len > out_written;
+        let target = if ready { 1.0 } else { 0.0 };
+        let (out, _) = h.ring_n(2);
+        let src = if ready { Some(out) } else { None };
+        self.fade(buf, src, first, mask, target, step, mute_fallback);
+        self.cursor += n;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn fade(&mut self, buf: &mut [f32], out: Option<*const f32>, first: u64, mask: u64, target: f32, step: f32, mute: bool) {
+        for (i, s) in buf.iter_mut().enumerate() {
+            self.wet = if self.wet < target { (self.wet + step).min(target) } else { (self.wet - step).max(target) };
+            let wet = match out {
+                Some(o) => {
+                    let v = unsafe { *o.add(((first + i as u64) & mask) as usize) };
+                    if v.is_finite() { v.clamp(-4.0, 4.0) } else { 0.0 }
+                }
+                None => 0.0,
+            };
+            let dry = if mute { 0.0 } else { *s };
+            *s = wet * self.wet + dry * (1.0 - self.wet);
+        }
     }
 }

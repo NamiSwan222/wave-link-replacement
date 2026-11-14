@@ -25,6 +25,13 @@ public static class ChangeLog
 public sealed class AppSettings
 {
     public string? MicDeviceId { get; set; }
+    /// <summary>
+    /// Which audio engine runs the effects: "wavefix" (WaveFix's own, new installs) or "eapo"
+    /// (Equalizer APO, kept for people who set WaveFix up before the engine existed).
+    /// </summary>
+    public string? Engine { get; set; }
+    /// <summary>True when settings.json existed at startup (an existing WaveFix user).</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public bool Existed { get; private set; }
     public bool NoiseRemoval { get; set; } = true;
     public bool LowCut { get; set; } = true;
     public string EqPreset { get; set; } = EqPresets.Flat;
@@ -54,7 +61,11 @@ public sealed class AppSettings
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
+            {
+                var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
+                s.Existed = true;
+                return s;
+            }
         }
         catch { /* corrupt file: fall back to defaults */ }
         return new AppSettings();

@@ -30,6 +30,13 @@ jobs:
       - name: Test voice effects plugin
         run: cargo test --release --manifest-path native/wavefix-fx/Cargo.toml
 
+      # WaveFix's own audio engine (the Windows audio effect new installs use), also embedded.
+      # Its test loads the built DLL the way Windows' audio service does.
+      - name: Test audio engine
+        run: |
+          cargo build --release --manifest-path native/wavefix-fx/Cargo.toml
+          cargo test --release --manifest-path native/wavefix-engine/Cargo.toml
+
       - name: Publish app (self-contained, single file)
         run: >
           dotnet publish src/WaveFix/WaveFix.csproj -c Release -r win-x64 --self-contained true -p:RequireVoiceFx=true

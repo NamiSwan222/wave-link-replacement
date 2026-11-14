@@ -261,7 +261,7 @@ fn param_names_are_short_unique_and_spaceless() {
 
 // ---- Soundboard bridge ----
 
-fn bridge_mem(ring: u32) -> Vec<u64> { vec![0u64; (64 + 4 * ring as usize) / 8 + 1] }
+fn bridge_mem(ring: u32) -> Vec<u64> { vec![0u64; wavefix_fx::bridge::bytes_for(ring) / 8 + 1] }
 
 #[test]
 fn soundboard_audio_is_mixed_into_the_mic_and_limited() {
@@ -329,6 +329,67 @@ fn soundboard_underrun_is_silence_not_old_audio() {
     for c in buf.chunks_mut(480) { d.process_with(&n, c, Some(h)); }
     assert!(buf[..1000].iter().all(|v| *v == 0.5));
     assert!(buf[1000..].iter().all(|v| *v == 0.0), "played stale ring data after the app stopped writing");
+}
+
+// ---- AI voice (RVC) link ----
+
+/// Runs the plugin block by block with a stand-in engine that converts every block it has
+/// received by `f`, `delay` samples late, while `engine_alive(block)` says so.
+fn run_rvc(x: &[f32], mute: bool, delay: u32, engine_alive: impl Fn(usize) -> bool, f: impl Fn(f32) -> f32 + Copy) -> Vec<f32> {
+    use wavefix_fx::bridge::Header;
+    let ring = 1 << 15;
+    let mut mem = bridge_mem(ring);
+    let h = unsafe { Header::init(mem.as_mut_ptr() as *mut u8, ring) };
+    let mut d = Dsp::new();
+    d.set_sample_rate(SR);
+    let n = norms(&[(p::RVC_ON, 1.0), (p::RVC_MUTE, if mute { 1.0 } else { 0.0 })]);
+    let mut y = x.to_vec();
+    let mut converted = 0u64;
+    for (b, c) in y.chunks_mut(480).enumerate() {
+        d.process_with(&n, c, Some(h));
+        if engine_alive(b) {
+            let written = h.rvc_in_write.load(std::sync::atomic::Ordering::Acquire);
+            h.engine_convert(converted, written, delay, f);
+            converted = written;
+        } else {
+            h.rvc_engine_beat.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    y
+}
+
+#[test]
+fn rvc_plays_the_converted_voice_after_the_delay() {
+    let x = sine(220.0, -12.0, 1.0);
+    let delay = 960;
+    let y = run_rvc(&x, false, delay, |_| true, |v| 0.5 * v);
+    // After the fade-in (30 ms) the output is exactly the converted input, `delay` samples late.
+    for i in 9600..x.len() {
+        assert!((y[i] - 0.5 * x[i - delay as usize]).abs() < 1e-6, "sample {i}: {} vs {}", y[i], 0.5 * x[i - delay as usize]);
+    }
+}
+
+#[test]
+fn rvc_without_engine_passes_the_real_voice_or_silence() {
+    let x = sine(220.0, -12.0, 0.5);
+    let real = run_rvc(&x, false, 960, |_| false, |v| v);
+    assert_eq!(real, x, "real voice should pass untouched when no engine runs");
+    let muted = run_rvc(&x, true, 960, |_| false, |v| v);
+    assert!(muted.iter().all(|v| *v == 0.0), "mute fallback should be silent");
+}
+
+#[test]
+fn rvc_engine_stopping_fades_back_to_the_real_voice() {
+    let x = sine(220.0, -12.0, 1.0);
+    // Engine runs for the first half second, then stops.
+    let y = run_rvc(&x, false, 960, |b| b < 50, |_| 0.0);
+    let ai = &y[9600..20_000];
+    assert!(rms_db(ai) < -60.0, "AI voice (silence here) should play while the engine runs");
+    let back = &y[30_000..];
+    assert!((rms_db(back) - rms_db(&x[30_000..])).abs() < 0.1, "real voice should be back after the engine stops");
+    // No click: the switch-over takes the 30 ms fade, not one sample.
+    let edge = y[24_000..30_000].windows(2).map(|w| (w[1] - w[0]).abs()).fold(0f32, f32::max);
+    assert!(edge < 0.05, "jump of {edge} when falling back");
 }
 
 // ---- The VST2 interface, called the way Equalizer APO calls it. ----

@@ -14,35 +14,24 @@ public static class EqPresets
     public const string Custom = "Custom";
     public static readonly string[] All = { Flat, Warm, Clear, Broadcast, Radio, Custom };
 
-    /// <summary>Equalizer APO filter lines for each preset.</summary>
-    public static IEnumerable<string> Lines(string preset) => preset switch
+    /// <summary>One filter of a preset: kind is hp, lp, pk, ls or hs.</summary>
+    public sealed record Filter(string Kind, double Hz, double Gain = 0, double? Q = null);
+
+    /// <summary>The filters of each preset (for both Equalizer APO and the WaveFix engine).</summary>
+    public static IReadOnlyList<Filter> Filters(string preset) => preset switch
     {
-        Warm => new[]
-        {
-            "Filter: ON LS Fc 180 Hz Gain 3 dB",
-            "Filter: ON PK Fc 3500 Hz Gain -1.5 dB Q 1",
-        },
-        Clear => new[]
-        {
-            "Filter: ON PK Fc 300 Hz Gain -3 dB Q 1",
-            "Filter: ON PK Fc 3000 Hz Gain 2 dB Q 1",
-            "Filter: ON HS Fc 6000 Hz Gain 3 dB",
-        },
-        Broadcast => new[]
-        {
-            "Filter: ON LS Fc 120 Hz Gain 2.5 dB",
-            "Filter: ON PK Fc 400 Hz Gain -2.5 dB Q 1.2",
-            "Filter: ON PK Fc 2500 Hz Gain 2.5 dB Q 1",
-            "Filter: ON HS Fc 8000 Hz Gain 2 dB",
-        },
-        Radio => new[]
-        {
-            "Filter: ON HP Fc 300 Hz",
-            "Filter: ON LP Fc 3400 Hz",
-            "Filter: ON PK Fc 1500 Hz Gain 4 dB Q 1",
-        },
-        _ => Array.Empty<string>(),
+        Warm => new Filter[] { new("ls", 180, 3), new("pk", 3500, -1.5, 1) },
+        Clear => new Filter[] { new("pk", 300, -3, 1), new("pk", 3000, 2, 1), new("hs", 6000, 3) },
+        Broadcast => new Filter[] { new("ls", 120, 2.5), new("pk", 400, -2.5, 1.2), new("pk", 2500, 2.5, 1), new("hs", 8000, 2) },
+        Radio => new Filter[] { new("hp", 300), new("lp", 3400), new("pk", 1500, 4, 1) },
+        _ => Array.Empty<Filter>(),
     };
+
+    /// <summary>Equalizer APO filter lines for each preset.</summary>
+    public static IEnumerable<string> Lines(string preset) => Filters(preset).Select(f =>
+        f.Kind is "hp" or "lp" ? FormattableString.Invariant($"Filter: ON {f.Kind.ToUpperInvariant()} Fc {f.Hz:0.###} Hz")
+        : f.Q is { } q ? FormattableString.Invariant($"Filter: ON {f.Kind.ToUpperInvariant()} Fc {f.Hz:0.###} Hz Gain {f.Gain:0.###} dB Q {q:0.###}")
+        : FormattableString.Invariant($"Filter: ON {f.Kind.ToUpperInvariant()} Fc {f.Hz:0.###} Hz Gain {f.Gain:0.###} dB"));
 }
 
 /// <summary>
@@ -60,8 +49,20 @@ public sealed class EffectsEngine
     public string ConfigDir => Path.Combine(InstallDir, "config");
     public string NoisePluginPath => Path.Combine(InstallDir, @"VSTPlugins\rnnoise\rnnoise_mono.dll");
 
-    public bool IsInstalled => File.Exists(Path.Combine(InstallDir, "EqualizerAPO.dll"));
-    public bool HasNoisePlugin => File.Exists(NoisePluginPath);
+    /// <summary>Run the chain on WaveFix's own engine (new installs) instead of Equalizer APO.</summary>
+    public bool UseWaveFixEngine { get; set; }
+
+    public bool EapoInstalled => File.Exists(Path.Combine(InstallDir, "EqualizerAPO.dll"));
+    public bool IsInstalled => UseWaveFixEngine ? WaveFixEngine.IsInstalled : EapoInstalled;
+    public bool HasNoisePlugin => File.Exists(ActiveNoisePlugin);
+    /// <summary>The RNNoise plugin the active engine loads.</summary>
+    public string ActiveNoisePlugin => UseWaveFixEngine ? WaveFixEngine.NoisePlugin : NoisePluginPath;
+    /// <summary>The name shown to users for the add-on that runs the effects.</summary>
+    public string EngineName => UseWaveFixEngine ? "the WaveFix audio engine" : "Equalizer APO";
+
+    /// <summary>Where the active engine stands on this mic (both engines use the endpoint slot).</summary>
+    public SlotState Slot(string endpointId) =>
+        UseWaveFixEngine ? (WaveFixEngine.IsAttached(endpointId) ? SlotState.Endpoint : SlotState.None) : GetSlot(endpointId);
 
     public EffectsEngine()
     {
@@ -101,6 +102,12 @@ public sealed class EffectsEngine
     /// <summary>Writes config.txt (device routing) and wavefix-mic.txt (the effect chain).</summary>
     public void Apply(AppSettings s, string micEndpointId)
     {
+        if (UseWaveFixEngine)
+        {
+            // The engine watches its config file; it runs only once setup has installed it.
+            if (WaveFixEngine.IsInstalled) WaveFixEngine.WriteConfig(micEndpointId, s);
+            return;
+        }
         if (!IsInstalled) return;
         var guid = micEndpointId[(micEndpointId.LastIndexOf('.') + 1)..];
 

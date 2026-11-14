@@ -22,7 +22,10 @@ public sealed class PluginEntry : Observable
 /// </summary>
 public static class PluginStore
 {
-    public static string Folder => System.IO.Path.Combine(
+    /// <summary>With WaveFix's own engine, plugins live in Program Files (admin-only) instead.</summary>
+    public static bool UseEngine { get; set; }
+
+    public static string Folder => UseEngine ? WaveFixEngine.PluginDir : System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WaveFix", "Plugins");
 
     /// <summary>Checks the file is a 64-bit VST2 plugin. Returns an error message, or null if OK.</summary>
@@ -101,6 +104,21 @@ public static class PluginStore
         return results.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>
+    /// Installs a plugin and returns its entry, or null if the user declined the Windows prompt.
+    /// WaveFix engine: copied into Program Files by an admin helper (one prompt).
+    /// </summary>
+    public static async Task<PluginEntry?> InstallAsync(string file)
+    {
+        if (!UseEngine) return Install(file);
+        var name = System.IO.Path.GetFileNameWithoutExtension(file);
+        var dest = System.IO.Path.Combine(Folder, System.IO.Path.GetFileName(file));
+        for (int i = 2; File.Exists(dest) && !SameFile(dest, file); i++)
+            dest = System.IO.Path.Combine(Folder, $"{name} ({i}).dll");
+        if (!File.Exists(dest) && await Setup.InstallPluginElevated(file, dest) == null) return null;
+        return new PluginEntry { Name = name, Path = dest, Enabled = true };
+    }
+
     /// <summary>Copies the plugin into the shared folder and returns the new entry.</summary>
     public static PluginEntry Install(string file)
     {
@@ -123,7 +141,7 @@ public static class PluginStore
     /// <summary>Deletes copies that no plugin entry uses any more (left behind while they were still loaded).</summary>
     public static void CleanOrphans(IEnumerable<PluginEntry> inUse)
     {
-        if (!Directory.Exists(Folder)) return;
+        if (UseEngine || !Directory.Exists(Folder)) return; // Program Files needs admin: leave them
         var used = new HashSet<string>(inUse.Select(p => p.Path), StringComparer.OrdinalIgnoreCase);
         foreach (var f in Directory.EnumerateFiles(Folder, "*.dll"))
             if (!used.Contains(f)) try { File.Delete(f); } catch { /* still loaded; try next start */ }
@@ -132,6 +150,7 @@ public static class PluginStore
     /// <summary>Deletes the copied file if no other entry uses it (best effort: it may be loaded).</summary>
     public static void Uninstall(PluginEntry p, IEnumerable<PluginEntry> remaining)
     {
+        if (UseEngine) return; // the engine stops loading it; the file in Program Files is harmless
         if (!p.Path.StartsWith(Folder, StringComparison.OrdinalIgnoreCase)) return;
         if (remaining.Any(r => string.Equals(r.Path, p.Path, StringComparison.OrdinalIgnoreCase))) return;
         try { File.Delete(p.Path); } catch { /* still loaded by the audio engine; harmless */ }

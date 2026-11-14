@@ -16,9 +16,11 @@ namespace WaveFix;
 /// </summary>
 public sealed unsafe class AudioBridge : IDisposable
 {
-    const uint Magic = 0x5242_4657, Version = 1;
-    const int HeaderBytes = 64;
+    const uint Magic = 0x5242_4657, Version = 2;
+    const int HeaderBytes = 128;
     public const int RingLen = 1 << 18; // 5.4 s at 48 kHz
+    /// <summary>Soundboard ring, RVC input ring, RVC output ring.</summary>
+    const int Rings = 3;
 
     public static string FilePath => Path.Combine(VoiceFx.Folder, "bridge.bin");
 
@@ -35,7 +37,7 @@ public sealed unsafe class AudioBridge : IDisposable
         var fs = new FileStream(FilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
         try
         {
-            long size = HeaderBytes + 4L * RingLen;
+            long size = HeaderBytes + Rings * 4L * RingLen;
             if (fs.Length != size) fs.SetLength(size);
             File.SetAttributes(FilePath, FileAttributes.Temporary); // keep it in memory, not on disk
         }
@@ -101,12 +103,34 @@ public sealed unsafe class AudioBridge : IDisposable
     /// <summary>The plugin processed audio within the last second (it's in the chain and running).</summary>
     public bool PluginAlive => PluginRate > 0 && Environment.TickCount64 - PluginBeat < 1000;
 
-    /// <summary>Writes samples at absolute positions [start, start + data.Length).</summary>
-    public void Write(long start, ReadOnlySpan<float> data)
+    /// <summary>Writes soundboard samples at absolute positions [start, start + data.Length).</summary>
+    public void Write(long start, ReadOnlySpan<float> data) => WriteRing(0, start, data);
+
+    float* Ring(int n) => (float*)(_p + HeaderBytes + (long)n * 4 * RingLen);
+
+    void WriteRing(int n, long start, ReadOnlySpan<float> data)
     {
-        var ring = (float*)(_p + HeaderBytes);
+        var ring = Ring(n);
         for (int i = 0; i < data.Length; i++) ring[(start + i) & (RingLen - 1)] = data[i];
     }
+
+    // ---- AI voice (RVC) timeline: the plugin writes the voice in, the engine writes it back converted ----
+
+    /// <summary>The plugin has written the voice up to here (absolute sample index).</summary>
+    public long RvcInputWritten => Volatile.Read(ref I64(56));
+    public long RvcOutputWritten { get => Volatile.Read(ref I64(64)); set => Volatile.Write(ref I64(64), value); }
+    public void RvcEngineBeat() => Volatile.Write(ref I64(72), (long)Environment.TickCount64);
+    /// <summary>Converted audio for position p plays at p + delay (samples).</summary>
+    public int RvcDelay { get => (int)U32(80); set => Volatile.Write(ref *(uint*)(_p + 80), (uint)value); }
+
+    /// <summary>Copies the voice the plugin sent for [start, start + dest.Length).</summary>
+    public void ReadRvcInput(long start, Span<float> dest)
+    {
+        var ring = Ring(1);
+        for (int i = 0; i < dest.Length; i++) dest[i] = ring[(start + i) & (RingLen - 1)];
+    }
+
+    public void WriteRvcOutput(long start, ReadOnlySpan<float> data) => WriteRing(2, start, data);
 
     public void Dispose()
     {
@@ -119,14 +143,52 @@ public sealed unsafe class AudioBridge : IDisposable
 /// <summary>Mixes the sounds that are playing; used for the mic feed and for "hear it myself".</summary>
 sealed class SoundMixer
 {
-    sealed class Voice { public required float[] Data; public int Pos; public float Gain; }
+    /// <summary>A playing sound: preloaded samples (short sounds) or a file read as it plays (long ones).</summary>
+    sealed class Voice
+    {
+        public float[]? Data;
+        public SoundStream? Stream;
+        public int Pos;
+        public float Gain;
+        public bool Done;
+        float[] _tmp = Array.Empty<float>();
+
+        /// <summary>Adds up to buf.Length samples (scaled) into buf.</summary>
+        public void MixInto(Span<float> buf, float gain)
+        {
+            if (Data != null)
+            {
+                int n = Math.Min(buf.Length, Data.Length - Pos);
+                for (int i = 0; i < n; i++) buf[i] += Data[Pos + i] * gain;
+                Pos += n;
+                Done = Pos >= Data.Length;
+                return;
+            }
+            if (_tmp.Length < buf.Length) _tmp = new float[buf.Length];
+            int got = Stream!.Read(_tmp.AsSpan(0, buf.Length));
+            for (int i = 0; i < got; i++) buf[i] += _tmp[i] * gain;
+            if (got < buf.Length) Done = true;
+        }
+
+        public void Dispose() => Stream?.Dispose();
+    }
+
     readonly List<Voice> _voices = new();
     readonly object _lock = new();
 
     public bool Busy { get { lock (_lock) return _voices.Count > 0; } }
 
     public void Add(float[] data, float gain) { lock (_lock) _voices.Add(new Voice { Data = data, Gain = gain }); }
-    public void Clear() { lock (_lock) _voices.Clear(); }
+    public void Add(SoundStream stream, float gain) { lock (_lock) _voices.Add(new Voice { Stream = stream, Gain = gain }); }
+
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            foreach (var v in _voices) v.Dispose();
+            _voices.Clear();
+        }
+    }
 
     /// <summary>Fills <paramref name="buf"/> (mono) with the mix and advances every sound.</summary>
     public void Read(Span<float> buf, float master)
@@ -136,12 +198,10 @@ sealed class SoundMixer
         {
             foreach (var v in _voices)
             {
-                int n = Math.Min(buf.Length, v.Data.Length - v.Pos);
-                var g = v.Gain * master;
-                for (int i = 0; i < n; i++) buf[i] += v.Data[v.Pos + i] * g;
-                v.Pos += n;
+                try { v.MixInto(buf, v.Gain * master); }
+                catch { v.Done = true; } // a file that stops decoding just ends
             }
-            _voices.RemoveAll(v => v.Pos >= v.Data.Length);
+            Retire();
         }
     }
 
@@ -150,10 +210,55 @@ sealed class SoundMixer
     {
         lock (_lock)
         {
-            foreach (var v in _voices) v.Pos += n;
-            _voices.RemoveAll(v => v.Pos >= v.Data.Length);
+            Span<float> scratch = stackalloc float[1024];
+            foreach (var v in _voices)
+                for (int left = n; left > 0 && !v.Done; left -= scratch.Length)
+                {
+                    try { v.MixInto(scratch[..Math.Min(scratch.Length, left)], 0); }
+                    catch { v.Done = true; }
+                }
+            Retire();
         }
     }
+
+    void Retire()
+    {
+        foreach (var v in _voices) if (v.Done) v.Dispose();
+        _voices.RemoveAll(v => v.Done);
+    }
+}
+
+/// <summary>A sound file decoded to mono at a given rate while it plays.</summary>
+public sealed class SoundStream : IDisposable
+{
+    readonly MediaFoundationReader _reader;
+    readonly ISampleProvider _sp;
+    float[] _buf = Array.Empty<float>();
+
+    public SoundStream(string path, int rate)
+    {
+        _reader = new MediaFoundationReader(path);
+        try { _sp = SoundboardEngine.ToMono(_reader.ToSampleProvider(), rate); }
+        catch { _reader.Dispose(); throw; }
+    }
+
+    public TimeSpan Length => _reader.TotalTime;
+
+    public int Read(Span<float> dest)
+    {
+        if (_buf.Length < dest.Length) _buf = new float[dest.Length];
+        int total = 0;
+        while (total < dest.Length)
+        {
+            int n = _sp.Read(_buf, 0, dest.Length - total);
+            if (n <= 0) break;
+            _buf.AsSpan(0, n).CopyTo(dest[total..]);
+            total += n;
+        }
+        return total;
+    }
+
+    public void Dispose() => _reader.Dispose();
 }
 
 /// <summary>Plays the mixer to a local output device (so you hear your own sounds).</summary>
@@ -190,7 +295,11 @@ public sealed class SoundboardEngine : IDisposable
     [DllImport("winmm")] static extern uint timeBeginPeriod(uint ms);
     [DllImport("winmm")] static extern uint timeEndPeriod(uint ms);
 
-    public const int MaxSeconds = 60;
+    /// <summary>Longest sound you can add.</summary>
+    public const int MaxMinutes = 15;
+    /// <summary>Sounds up to this long are decoded once and kept in memory (instant start);
+    /// longer ones are read from the file while they play.</summary>
+    const double PreloadSeconds = 30;
     /// <summary>How far ahead of the audio engine the app writes. Covers Windows timer jitter.</summary>
     const double LeadSeconds = 0.06;
 
@@ -232,22 +341,36 @@ public sealed class SoundboardEngine : IDisposable
         StopMonitor();
     }
 
-    /// <summary>Loads and resamples a file to mono at <paramref name="rate"/> (cached). Throws on bad files.</summary>
+    internal static ISampleProvider ToMono(ISampleProvider sp, int rate)
+    {
+        if (sp.WaveFormat.Channels > 1) sp = new DownmixToMono(sp);
+        if (sp.WaveFormat.SampleRate != rate) sp = new WdlResamplingSampleProvider(sp, rate);
+        return sp;
+    }
+
+    /// <summary>
+    /// Checks a file can be played: it opens, decodes, has sound and isn't too long. Returns its
+    /// length. Throws with a reason for the user otherwise.
+    /// </summary>
+    public static TimeSpan Check(string path)
+    {
+        using var s = new SoundStream(path, 48000);
+        var len = s.Length;
+        if (len > TimeSpan.FromMinutes(MaxMinutes)) throw new InvalidOperationException($"it's longer than {MaxMinutes} minutes.");
+        var probe = new float[48000];
+        if (s.Read(probe) == 0) throw new InvalidOperationException("there's no sound in it.");
+        return len;
+    }
+
+    /// <summary>Loads and resamples a whole file to mono at <paramref name="rate"/> (cached). For short sounds.</summary>
     public float[] Decode(string path, int rate)
     {
         lock (_cacheLock) if (_cache.TryGetValue((path, rate), out var hit)) return hit;
-        using var reader = new MediaFoundationReader(path);
-        ISampleProvider sp = reader.ToSampleProvider();
-        if (sp.WaveFormat.Channels > 1) sp = new DownmixToMono(sp);
-        if (sp.WaveFormat.SampleRate != rate) sp = new WdlResamplingSampleProvider(sp, rate);
+        using var s = new SoundStream(path, rate);
         var data = new List<float>(rate * 4);
         var buf = new float[rate];
         int n;
-        while ((n = sp.Read(buf, 0, buf.Length)) > 0)
-        {
-            data.AddRange(buf.AsSpan(0, n).ToArray());
-            if (data.Count > rate * MaxSeconds) throw new InvalidOperationException($"Sounds can be up to {MaxSeconds} seconds long.");
-        }
+        while ((n = s.Read(buf)) > 0) data.AddRange(buf.AsSpan(0, n).ToArray());
         var result = data.ToArray();
         lock (_cacheLock) _cache[(path, rate)] = result;
         return result;
@@ -262,11 +385,15 @@ public sealed class SoundboardEngine : IDisposable
     public Task Play(string path, float gain) => Task.Run(() =>
     {
         int rate = _bridge?.PluginRate is > 0 and var r ? r : 48000;
-        _mic.Add(Decode(path, rate), gain);
+        bool preload;
+        using (var probe = new SoundStream(path, rate)) preload = probe.Length.TotalSeconds <= PreloadSeconds;
+        if (preload) _mic.Add(Decode(path, rate), gain);
+        else _mic.Add(new SoundStream(path, rate), gain);
         if (Monitor)
         {
             EnsureMonitor();
-            _monitor.Add(Decode(path, _monitorRate), gain);
+            if (preload) _monitor.Add(Decode(path, _monitorRate), gain);
+            else _monitor.Add(new SoundStream(path, _monitorRate), gain);
         }
     });
 

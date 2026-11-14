@@ -15,9 +15,17 @@ public partial class App : Application
         base.OnStartup(e);
 
         // Headless helper roles used by one-click setup (no window, no tray, no single-instance check).
-        if (e.Args.Length >= 3 && e.Args[0] == "--setup") { Shutdown(Setup.RunElevated(e.Args[1], e.Args[2], e.Args.Length >= 4 ? e.Args[3] : null)); return; }
+        if (e.Args.Length >= 3 && e.Args[0] == "--setup")
+        {
+            Setup.UseEngine = e.Args.Contains("--engine");
+            var plugin = e.Args.Skip(3).FirstOrDefault(a => !a.StartsWith("--"));
+            Shutdown(Setup.RunElevated(e.Args[1], e.Args[2], plugin));
+            return;
+        }
+        if (e.Args.Length >= 3 && e.Args[0] == "--setup-undo") { Shutdown(Setup.RunUndoElevated(e.Args[1], e.Args[2])); return; }
+        if (e.Args.Length >= 4 && e.Args[0] == "--plugin-install") { Shutdown(Setup.PluginInstall(e.Args[1], e.Args[2], e.Args[3])); return; }
         if (e.Args.Length >= 4 && e.Args[0] == "--edit-plugin") { PluginEditor.Run(this, e.Args[1], e.Args[2], e.Args[3]); return; }
-        if (e.Args.Length >= 3 && e.Args[0] == "--system-attach") { Shutdown(Setup.SystemAttach(e.Args[1], e.Args[2])); return; }
+        if (e.Args.Length >= 3 && e.Args[0] == "--system-attach") { Shutdown(Setup.SystemAttach(e.Args[1], e.Args[2], e.Args.Contains("--engine"), e.Args.Contains("--undo"))); return; }
 
         bool updated = e.Args.Contains("--updated");
 

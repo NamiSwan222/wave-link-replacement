@@ -9,7 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyTitle>WaveFix</AssemblyTitle>
     <Product>WaveFix</Product>
-    <Version>0.7.0</Version>
+    <Version>0.8.0</Version>
     <ApplicationIcon>Assets\WaveFix.ico</ApplicationIcon>
     <Company>NamiSwan222</Company>
     <Description>Wave Link replacement: mic effects that stay out of Discord streams</Description>
@@ -47,6 +47,23 @@
     <Warning Condition="!Exists('$(VoiceFxDll)')" Text="Building without the voice effects plugin (install Rust from https://rustup.rs to include it)." />
     <ItemGroup Condition="Exists('$(VoiceFxDll)')">
       <EmbeddedResource Include="$(VoiceFxDll)" LogicalName="WaveFix.VoiceFx.dll" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    WaveFix's own audio engine (native/wavefix-engine, Rust): the Windows audio effect new installs
+    use instead of Equalizer APO. Built and embedded like the effects plugin above.
+  -->
+  <PropertyGroup>
+    <EngineDir>$(MSBuildThisFileDirectory)..\..\native\wavefix-engine\</EngineDir>
+    <EngineDll>$(EngineDir)target\release\wavefix_engine.dll</EngineDll>
+  </PropertyGroup>
+  <Target Name="BuildEngine" BeforeTargets="BeforeBuild" DependsOnTargets="BuildVoiceFx" Condition="'$(SkipVoiceFx)' != 'true'">
+    <Exec Command="cargo build --release --quiet --manifest-path &quot;$(EngineDir)Cargo.toml&quot;" ContinueOnError="WarnAndContinue" />
+    <Error Condition="'$(RequireVoiceFx)' == 'true' And !Exists('$(EngineDll)')" Text="The WaveFix audio engine didn't build (needs Rust: https://rustup.rs)." />
+    <Warning Condition="!Exists('$(EngineDll)')" Text="Building without the WaveFix audio engine (new installs will fall back to Equalizer APO)." />
+    <ItemGroup Condition="Exists('$(EngineDll)')">
+      <EmbeddedResource Include="$(EngineDll)" LogicalName="WaveFix.Engine.dll" />
     </ItemGroup>
   </Target>
 

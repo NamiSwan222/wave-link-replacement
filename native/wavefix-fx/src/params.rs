@@ -56,7 +56,9 @@ pub const VERB_SIZE: usize = 26;
 pub const LIM_ON: usize = 27;
 pub const LIM_CEILING: usize = 28;
 pub const SB_ON: usize = 29;
-pub const COUNT: usize = 30;
+pub const RVC_ON: usize = 30;
+pub const RVC_MUTE: usize = 31;
+pub const COUNT: usize = 32;
 
 /// Names stay at 15 characters or fewer and without spaces (hosts give small name buffers).
 pub static PARAMS: [Param; COUNT] = [
@@ -91,6 +93,10 @@ pub static PARAMS: [Param; COUNT] = [
     lin("LimCeiling", -24.0, 0.0, -1.0, "dB"),
     // Mixes in audio the WaveFix app sends (soundboard), just before the limiter.
     toggle("SbOn"),
+    // AI voice: send the voice to the app's RVC engine and play back the converted voice.
+    toggle("RvcOn"),
+    // When the AI voice isn't available: silence (on) or the real voice (off).
+    toggle("RvcMute"),
 ];
 
 impl Param {

@@ -239,6 +239,8 @@ pub struct Dsp {
     lim_gain: f32,
     // Soundboard (audio from the app)
     sb: bridge::Reader,
+    // AI voice (audio to and from the app's RVC engine)
+    rvc: bridge::RvcLink,
 }
 
 impl Dsp {
@@ -261,6 +263,7 @@ impl Dsp {
             allpasses: [Allpass::new(), Allpass::new()],
             lim_gain: 1.0,
             sb: bridge::Reader::default(),
+            rvc: bridge::RvcLink::default(),
         };
         d.set_sample_rate(48_000.0);
         d
@@ -299,7 +302,8 @@ impl Dsp {
     /// Processes one block in place. `norm` holds the 0..1 parameter values.
     pub fn process(&mut self, norm: &[f32; COUNT], buf: &mut [f32]) {
         let sb_on = PARAMS[p::SB_ON].to_value(norm[p::SB_ON]) >= 0.5;
-        let header = if sb_on { bridge::attach_rt() } else { None };
+        let rvc_on = PARAMS[p::RVC_ON].to_value(norm[p::RVC_ON]) >= 0.5;
+        let header = if sb_on || rvc_on { bridge::attach_rt() } else { None };
         self.process_with(norm, buf, header);
     }
 
@@ -414,7 +418,17 @@ impl Dsp {
                 self.comp_gr = gr + c * (self.comp_gr - gr);
                 y *= db_to_lin(-self.comp_gr) * c_makeup;
             }
+            *x = y;
+        }
 
+        // AI voice (RVC): the polished voice goes to WaveFix's AI engine and comes back
+        // converted, a fixed delay later. The voice changer effects then apply on top.
+        if s.on(p::RVC_ON) {
+            self.rvc.process(bridge, sr, buf, s.on(p::RVC_MUTE));
+        }
+
+        for x in buf.iter_mut() {
+            let mut y = *x;
             if voice {
                 if shift { y = self.pitch.run(y); }
                 if wobble > 0.001 {

@@ -17,6 +17,30 @@ Any replacement that processes the mic inside a normal app and plays it to a vir
 
 ## The fix
 
+WaveFix runs its effects **inside the Windows audio engine** (`audiodg.exe`), as an Audio
+Processing Object on the physical mic. New installs use **WaveFix's own engine**
+(`native/wavefix-engine`, Rust); setups made before it existed keep using Equalizer APO, which is
+described below and works the same way.
+
+### WaveFix engine (new installs)
+
+- `Program Files\WaveFix\Engine\wavefix-engine-<hash>.dll` is registered as a Windows audio effect
+  (COM class `{1F0E0A0C-41EE-4E1A-B2C4-0681D5344BDD}`, registered like a driver's APO) and added **last**
+  to the mic's endpoint effects (the composite list, `{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},15`), so any
+  effects the mic already had keep running. Endpoint effects apply to every stream, raw mode included.
+  The original values are saved under `HKLM\SOFTWARE\WaveFix\Backup`; **Take the engine off this mic**
+  on the Setup page puts them back.
+- The app writes the chain as JSON to `ProgramData\WaveFix\Engine\config\<mic>.json`; the engine
+  reloads it within a fraction of a second and reports to `...\status\<mic>.json`.
+- The engine only loads code from `Program Files\WaveFix` (admin-only): RNNoise and your own plugins
+  are copied there with one Windows permission prompt. No other program can slip code into Windows
+  audio through WaveFix. An engine update asks for permission once, too.
+- `cargo test` in `native/wavefix-engine` loads the built DLL the way Windows' audio service does
+  (class factory, Initialize, format checks, LockForProcess, APOProcess) and checks the audio.
+- Written from Microsoft's documented APO interfaces; Equalizer APO (GPL) was only a reference.
+
+### Equalizer APO (setups from before the engine)
+
 WaveFix never plays your mic itself. Effects run **inside the Windows audio engine**
 (`audiodg.exe`) as an Audio Processing Object on the physical mic endpoint, via
 [Equalizer APO](https://sourceforge.net/projects/equalizerapo/). Discord's process loopback

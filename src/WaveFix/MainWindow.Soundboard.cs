@@ -104,9 +104,33 @@ public partial class MainWindow
         _ = AddSounds(dlg.FileNames);
     }
 
+    static readonly string[] SoundExtensions = { ".mp3", ".wav", ".m4a", ".wma", ".aac", ".flac" };
+
+    void Soundboard_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    void Soundboard_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+        {
+            // Folders add every sound file inside them.
+            var files = paths.SelectMany(p => Directory.Exists(p)
+                ? Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories).Where(f => SoundExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+                : new[] { p }).ToArray();
+            _ = AddSounds(files);
+        }
+        e.Handled = true;
+    }
+
+    void CloseSoundProblems_Click(object sender, RoutedEventArgs e) => SoundAddProblems.Visibility = Visibility.Collapsed;
+
     async Task AddSounds(string[] files)
     {
         AddSoundsButton.IsEnabled = false;
+        SoundAddProblems.Visibility = Visibility.Collapsed;
         var problems = new List<string>();
         try
         {
@@ -117,7 +141,7 @@ public partial class MainWindow
                 try
                 {
                     // Check it decodes (and isn't too long) before adding it.
-                    await Task.Run(() => _soundboard.Decode(file, 48000));
+                    await Task.Run(() => SoundboardEngine.Check(file));
                     var entry = new SoundEntry { Name = name };
                     var dest = Path.Combine(SoundboardSettings.Folder, entry.Id + Path.GetExtension(file));
                     File.Copy(file, dest, overwrite: true);
@@ -126,13 +150,24 @@ public partial class MainWindow
                     _sounds.Add(entry);
                     AddSoundShortcutRow(entry);
                 }
-                catch (Exception ex) { problems.Add($"{name}: {ex.Message}"); }
+                catch (Exception ex)
+                {
+                    var why = ex is InvalidOperationException ? ex.Message
+                        : ex is System.Runtime.InteropServices.COMException ? "Windows can't decode this file (an unusual format, or it's damaged)."
+                        : ex.Message;
+                    problems.Add($"{name}: {why}");
+                    ChangeLog.Write($"Sound not added: {file}: {ex.GetType().Name}: {ex.Message}");
+                }
             }
         }
         finally { AddSoundsButton.IsEnabled = true; }
         SaveSounds();
         if (problems.Count > 0)
-            MessageBox.Show(this, "Some sounds couldn't be added:\n\n" + string.Join("\n", problems), "WaveFix", MessageBoxButton.OK, MessageBoxImage.Warning);
+        {
+            // Stays on the page until dismissed, so it can't be missed.
+            SoundAddProblemsText.Text = (problems.Count == 1 ? "This sound couldn't be added:\n" : "These sounds couldn't be added:\n") + string.Join("\n", problems);
+            SoundAddProblems.Visibility = Visibility.Visible;
+        }
     }
 
     void SaveSounds()

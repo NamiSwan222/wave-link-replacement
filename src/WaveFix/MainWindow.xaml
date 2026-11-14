@@ -148,6 +148,11 @@
                                         <TextBlock x:Name="SetupButtonText" Text="Set it up for me" FontWeight="Bold" FontSize="14.5" Foreground="White" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
+                                <Button x:Name="UndoSetupButton" Style="{StaticResource LinkButton}" Margin="16,0,0,0" VerticalAlignment="Center" Click="UndoSetup_Click"
+                                        Visibility="Collapsed" AutomationProperties.Name="Take WaveFix's engine off this mic"
+                                        ToolTip="Puts this mic's original Windows effect settings back (one permission prompt).">
+                                    <TextBlock Text="Take the engine off this mic" FontSize="12.5" Foreground="{StaticResource SubText}"/>
+                                </Button>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -159,7 +164,7 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
-                            <TextBlock Grid.Column="1" Style="{StaticResource Hint}"
+                            <TextBlock x:Name="SetupNote" Grid.Column="1" Style="{StaticResource Hint}" TextWrapping="Wrap"
                                        Text="Windows will ask for permission once. Your sound drops for a few seconds at the end while Windows audio restarts. WaveFix downloads Equalizer APO (from SourceForge) and the RNNoise plugin (from GitHub) and checks each against a known fingerprint before using it. Steps that are already done are skipped."/>
                         </Grid>
                     </Border>
@@ -449,7 +454,8 @@
             </ScrollViewer>
 
             <!-- ===== Soundboard ===== -->
-            <ScrollViewer x:Name="PageSoundboard" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26">
+            <ScrollViewer x:Name="PageSoundboard" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26"
+                          AllowDrop="True" DragOver="Soundboard_DragOver" Drop="Soundboard_Drop">
                 <StackPanel>
                     <TextBlock Text="Soundboard" Style="{StaticResource PageTitle}"/>
                     <TextBlock Text="Play sound effects into your mic. Everyone in Discord, games and calls hears them." Style="{StaticResource PageSubtitle}"/>
@@ -510,7 +516,15 @@
                             </DockPanel>
 
                             <TextBlock x:Name="EmptySounds" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,4,0,8"
-                                       Text="No sounds yet. Add MP3, WAV, M4A, WMA or AAC files (up to 60 seconds each). Click a sound to play it."/>
+                                       Text="No sounds yet. Click Add sounds or drop files here: MP3, WAV, M4A, WMA, AAC or FLAC, up to 15 minutes each. Click a sound to play it."/>
+                            <Border x:Name="SoundAddProblems" CornerRadius="12" Background="{StaticResource WarnSoft}" Padding="14,12" Margin="0,4,0,12" Visibility="Collapsed">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" VerticalAlignment="Top" Click="CloseSoundProblems_Click" AutomationProperties.Name="Dismiss">
+                                        <TextBlock Text="&#xE711;" Style="{StaticResource Icon}" FontSize="10" Foreground="{StaticResource SubText}"/>
+                                    </Button>
+                                    <TextBlock x:Name="SoundAddProblemsText" Style="{StaticResource Hint}" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                </DockPanel>
+                            </Border>
                             <ItemsControl x:Name="SoundList">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>

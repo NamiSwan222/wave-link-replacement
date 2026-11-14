@@ -70,6 +70,7 @@ public partial class MainWindow : Window
         Mic.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MicController.Muted)) UpdateMuteLabel(); };
         Mic.RefreshDevices(_settings.MicDeviceId);
         UpdateMuteLabel();
+        ChooseEngine();
 
         // Mixer page
         if (!Mixer.RoutingAvailable)
@@ -225,11 +226,18 @@ public partial class MainWindow : Window
         if (Mic.DeviceId == null)
         { SetStatus(StatusKind.Bad, "No microphone found", "Plug in your mic and it'll show up here.", "No mic"); return; }
         if (!_engine.IsInstalled)
-        { SetStatus(StatusKind.Bad, "Let's finish setting up", "WaveFix needs a free audio add-on (Equalizer APO) to run your effects. It can install everything for you.", "Setup needed"); return; }
+        {
+            SetStatus(StatusKind.Bad, "Let's finish setting up", _engine.UseWaveFixEngine
+                ? "WaveFix needs to install its audio engine to run your effects. It does it for you in one click."
+                : "WaveFix needs a free audio add-on (Equalizer APO) to run your effects. It can install everything for you.", "Setup needed");
+            return;
+        }
+        if (_engine.UseWaveFixEngine && WaveFixEngine.NeedsUpdate)
+        { SetStatus(StatusKind.Warn, "Update the audio engine", "A newer WaveFix audio engine is ready. One click installs it (Windows asks for permission once).", "Update ready"); return; }
         if (Process.GetProcessesByName("Elgato.WaveLink").Length > 0)
         { SetStatus(StatusKind.Warn, "Wave Link is still open", "Close Wave Link. While it runs, people watching your Discord stream can hear your mic.", "Close Wave Link"); return; }
 
-        switch (EffectsEngine.GetSlot(Mic.DeviceId))
+        switch (_engine.Slot(Mic.DeviceId))
         {
             case EffectsEngine.SlotState.None:
                 SetStatus(StatusKind.Bad, "Effects aren't connected to this mic", "One click connects them, so every app, Discord included, hears your cleaned-up voice.", "Setup needed"); break;
@@ -272,6 +280,46 @@ public partial class MainWindow : Window
         _settings.Save();
     }
 
+    // ---------- Engine ----------
+
+    /// <summary>
+    /// Picks the engine once: people who already run WaveFix on Equalizer APO keep it; everyone
+    /// else (new installs) gets WaveFix's own engine.
+    /// </summary>
+    void ChooseEngine()
+    {
+        if (_settings.Engine is not ("wavefix" or "eapo"))
+        {
+            bool existingEapoUser = _settings.Existed && (_engine.EapoInstalled
+                || (Mic.DeviceId != null && EffectsEngine.GetSlot(Mic.DeviceId) != EffectsEngine.SlotState.None));
+            _settings.Engine = existingEapoUser ? "eapo" : "wavefix";
+            ChangeLog.Write($"Audio engine: {_settings.Engine} ({(existingEapoUser ? "existing Equalizer APO setup" : "new install")})");
+            _settings.Save();
+        }
+        bool engine = _settings.Engine == "wavefix" && WaveFixEngine.Available;
+        _engine.UseWaveFixEngine = engine;
+        Setup.UseEngine = engine;
+        PluginStore.UseEngine = engine;
+        SetupNote.Text = engine
+            ? "Windows will ask for permission once. Your sound drops for a few seconds at the end while Windows audio restarts. WaveFix installs its own audio engine and adds itself after any effects your mic already has (they keep working). It downloads the RNNoise plugin from GitHub and checks it against a known fingerprint. Steps that are already done are skipped."
+            : SetupNote.Text;
+    }
+
+    async void UndoSetup_Click(object sender, RoutedEventArgs e)
+    {
+        if (Mic.DeviceId is not { } mic) return;
+        if (MessageBox.Show(this, "Take WaveFix's engine off this mic? Its original Windows effect settings are put back, and your sound drops for a few seconds while Windows audio restarts.",
+                "WaveFix", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+        UndoSetupButton.IsEnabled = false;
+        bool ok = await Setup.UndoAsync(mic);
+        UndoSetupButton.IsEnabled = true;
+        ChangeLog.Write($"Engine taken off mic {mic}: {(ok ? "done" : "failed or declined")}");
+        _setupShowsResult = false;
+        RefreshSetupChecklist();
+        UpdateStatus();
+        ShowSetupResult(ok, ok ? "Done. This mic is back to its original Windows settings." : "That didn't finish (or permission was declined). Nothing was changed.", showHelp: !ok);
+    }
+
     // ---------- Setup ----------
 
     readonly ObservableCollection<SetupStepRow> _setupSteps = new();
@@ -292,7 +340,7 @@ public partial class MainWindow : Window
         var done = Setup.DoneSteps(Mic.DeviceId);
         string[] todo =
         {
-            "Free audio engine add-on that runs your effects inside Windows.",
+            Setup.UseEngine ? "WaveFix's own engine that runs your effects inside Windows audio." : "Free audio engine add-on that runs your effects inside Windows.",
             "AI noise removal (RNNoise), checked and copied into place.",
             "Puts the effects on this mic so Discord, OBS and every app get them.",
             "Only if something changed. Sound drops for a few seconds.",
@@ -305,6 +353,7 @@ public partial class MainWindow : Window
         bool complete = Setup.IsComplete(Mic.DeviceId);
         SetupButtonText.Text = complete ? "Everything's set up" : "Set it up for me";
         SetupButton.IsEnabled = !complete;
+        UndoSetupButton.Visibility = Setup.UseEngine && WaveFixEngine.IsAttached(Mic.DeviceId) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     void RunSetup_Click(object sender, RoutedEventArgs e) => _ = RunSetup(null);
@@ -481,7 +530,7 @@ public partial class MainWindow : Window
     void NoiseSettings_Click(object sender, RoutedEventArgs e)
     {
         if (!_engine.HasNoisePlugin) { NavSetup.Visibility = Visibility.Visible; NavSetup.IsChecked = true; return; }
-        OpenPluginSettings(_engine.NoisePluginPath, "Noise removal", () => _settings.NoiseState, s => _settings.NoiseState = s);
+        OpenPluginSettings(_engine.ActiveNoisePlugin, "Noise removal", () => _settings.NoiseState, s => _settings.NoiseState = s);
     }
 
     void NoiseReset_Click(object sender, RoutedEventArgs e)
@@ -572,16 +621,17 @@ public partial class MainWindow : Window
             InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
         };
         if (dlg.ShowDialog(this) != true) return;
-        AddPluginFile(dlg.FileName);
+        _ = AddPluginFile(dlg.FileName);
     }
 
-    bool AddPluginFile(string file)
+    async Task<bool> AddPluginFile(string file)
     {
         var problem = PluginStore.Validate(file);
         if (problem != null) { ShowPluginError(problem); return false; }
         try
         {
-            var entry = PluginStore.Install(file);
+            var entry = await PluginStore.InstallAsync(file);
+            if (entry == null) { ShowPluginError("Windows permission was declined, so the plugin wasn't added."); return false; }
             if (_plugins.Any(p => string.Equals(p.Path, entry.Path, StringComparison.OrdinalIgnoreCase)))
             { ShowPluginError($"{entry.Name} is already in your list."); return false; }
             _plugins.Add(entry);
@@ -620,7 +670,7 @@ public partial class MainWindow : Window
 
         // Skip the built-in noise removal and plugins already in the list (by name: we keep copies).
         var have = new HashSet<string>(_plugins.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
-        var skip = new[] { _engine.NoisePluginPath, _engine.NoisePluginPath.Replace("_mono", "_stereo") };
+        var skip = new[] { _engine.ActiveNoisePlugin, _engine.ActiveNoisePlugin.Replace("_mono", "_stereo") };
         try
         {
             var found = await Task.Run(() => PluginStore.Scan(folders, skip, cts.Token), cts.Token);
@@ -641,10 +691,10 @@ public partial class MainWindow : Window
         }
     }
 
-    void AddFound_Click(object sender, RoutedEventArgs e)
+    async void AddFound_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is not PluginStore.Found f) return;
-        if (AddPluginFile(f.Path)) _found.Remove(f);
+        if (await AddPluginFile(f.Path)) _found.Remove(f);
         if (_found.Count == 0) ScanStatus.Text = "All added. Turn plugins on or off and reorder them below.";
     }
 
