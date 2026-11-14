@@ -29,7 +29,8 @@ public partial class App : Application
         if (e.Args.Length >= 3 && e.Args[0] == "--setup-undo") { Shutdown(Setup.RunUndoElevated(e.Args[1], e.Args[2])); return; }
         if (e.Args.Length >= 4 && e.Args[0] == "--plugin-install") { Shutdown(Setup.PluginInstall(e.Args[1], e.Args[2], e.Args[3])); return; }
         if (e.Args.Length >= 4 && e.Args[0] == "--edit-plugin") { PluginEditor.Run(this, e.Args[1], e.Args[2], e.Args[3]); return; }
-        if (e.Args.Length >= 3 && e.Args[0] == "--system-attach") { Shutdown(Setup.SystemAttach(e.Args[1], e.Args[2], e.Args.Contains("--undo"), e.Args.Contains("--migrate"))); return; }
+        if (e.Args.Length >= 3 && e.Args[0] == "--system-attach") { var ri = Array.IndexOf(e.Args, "--result");
+            Shutdown(Setup.SystemAttach(e.Args[1], e.Args[2], e.Args.Contains("--undo"), e.Args.Contains("--migrate"), ri > 0 && ri + 1 < e.Args.Length ? e.Args[ri + 1] : null)); return; }
 
         bool updated = e.Args.Contains("--updated");
 

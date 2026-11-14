@@ -191,8 +191,13 @@ public static class Setup
             {
                 Step(2, "RUN", Migrate ? "Switching your mic to WaveFix's engine…" : "Connecting the engine to your mic…");
                 WaveFixEngine.BackupMic(guid, fromEqualizerApo: EqualizerApo.IsOnMic("x.{" + guid + "}"));
-                RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\"" + (Migrate ? " --migrate" : ""));
-                if (!attached()) throw new InvalidOperationException("Windows didn't accept the mic setting.");
+                var result = RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\"" + (Migrate ? " --migrate" : ""));
+                if (!attached())
+                {
+                    Log($"LOG mic settings now: {DescribeMic(guid)}");
+                    Log($"LOG engine attached: {WaveFixEngine.IsAttached(guid)}, Equalizer APO still on mic: {EqualizerApo.IsOnMic("x.{" + guid + "}")}");
+                    throw new InvalidOperationException(result.StartsWith("FAIL") ? result[5..] : "Windows didn't accept the mic setting.");
+                }
                 changed = true;
                 if (Migrate && EqualizerApo.Installed)
                 {
@@ -362,8 +367,18 @@ public static class Setup
     }
 
     /// <summary>Runs this exe once as SYSTEM through a temporary scheduled task, then deletes the task.</summary>
-    static void RunAsSystem(string args)
+    /// <summary>Where the SYSTEM step reports "OK" or "FAIL reason" (admin-only folder).</summary>
+    static string SystemResultPath => Path.Combine(WorkDir, "system-result.txt");
+
+    /// <summary>
+    /// Runs the SYSTEM step and waits for its own result file. The task's state alone isn't enough:
+    /// it can still be queued a second or two after Run (slow PC, or the first start of a new
+    /// WaveFix version under SYSTEM), and deleting it then means the step never runs.
+    /// </summary>
+    static string RunAsSystem(string args)
     {
+        Directory.CreateDirectory(WorkDir);
+        try { File.Delete(SystemResultPath); } catch { }
         var type = Type.GetTypeFromProgID("Schedule.Service") ?? throw new InvalidOperationException("Task Scheduler isn't available.");
         dynamic svc = Activator.CreateInstance(type)!;
         svc.Connect();
@@ -375,17 +390,49 @@ public static class Setup
         def.Principal.RunLevel = 1; // highest
         dynamic action = def.Actions.Create(0); // exec
         action.Path = Environment.ProcessPath!;
-        action.Arguments = args;
+        action.Arguments = args + $" --result \"{SystemResultPath}\"";
         // 6 = create or update, 5 = run as service account (SYSTEM)
         dynamic task = folder.RegisterTaskDefinition(TaskName, def, 6, "SYSTEM", null, 5);
         try
         {
             task.Run(null);
-            var until = DateTime.Now.AddSeconds(60);
-            Thread.Sleep(1500);
-            while (DateTime.Now < until && (int)task.State == 4 /* running */) Thread.Sleep(500);
+            var started = DateTime.Now;
+            int lastState = -1;
+            while (DateTime.Now - started < TimeSpan.FromSeconds(90))
+            {
+                if (File.Exists(SystemResultPath))
+                {
+                    string result;
+                    try { result = File.ReadAllText(SystemResultPath).Trim(); } catch { Thread.Sleep(200); continue; }
+                    if (result.Length == 0) { Thread.Sleep(200); continue; }
+                    Log($"LOG SYSTEM step result after {(DateTime.Now - started).TotalSeconds:0.0} s: {result}");
+                    return result;
+                }
+                int state = -1;
+                try { state = (int)task.State; } catch { }
+                if (state != lastState) { Log($"LOG SYSTEM task state {state} after {(DateTime.Now - started).TotalSeconds:0.0} s"); lastState = state; }
+                Thread.Sleep(250);
+            }
+            string last = "";
+            try { last = $" (task state {(int)task.State}, last result 0x{(int)task.LastTaskResult:X8})"; } catch { }
+            Log($"LOG SYSTEM step didn't report within 90 s{last}");
+            return "FAIL The step that changes the mic's settings didn't run" + last;
         }
         finally { try { folder.DeleteTask(TaskName, 0); } catch { } }
+    }
+
+    /// <summary>What the mic's effect settings hold right now (for the setup log when something fails).</summary>
+    static string DescribeMic(string guid)
+    {
+        try
+        {
+            using var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+            using var fx = hklm.OpenSubKey($@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{{{guid.Trim('{', '}')}}}\FxProperties");
+            if (fx == null) return "no FxProperties key";
+            return string.Join("; ", fx.GetValueNames().Where(n => n.StartsWith("{d04e05a6", StringComparison.OrdinalIgnoreCase) || n.StartsWith("{d3993a3f", StringComparison.OrdinalIgnoreCase))
+                .Select(n => $"{n}={(fx.GetValue(n) is string[] a ? "[" + string.Join(", ", a) + "]" : fx.GetValue(n))}"));
+        }
+        catch (Exception ex) { return "couldn't read: " + ex.Message; }
     }
 
     // ======================= Undo (WaveFix engine) =======================
@@ -416,8 +463,12 @@ public static class Setup
         {
             var guid = micGuid.Trim('{', '}');
             Log($"LOG WaveFix {Updater.Current} undo, mic {guid}");
-            RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\" --undo");
-            if (WaveFixEngine.IsAttached(guid)) throw new InvalidOperationException("Windows didn't accept the change.");
+            var result = RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\" --undo");
+            if (WaveFixEngine.IsAttached(guid))
+            {
+                Log($"LOG mic settings now: {DescribeMic(guid)}");
+                throw new InvalidOperationException(result.StartsWith("FAIL") ? result[5..] : "Windows didn't accept the change.");
+            }
             WaveFixEngine.ForgetBackup(guid);
             RestartAudio();
             Log("RESULT OK");
@@ -489,44 +540,62 @@ public static class Setup
     /// raw mode Discord uses), or takes it off (undo). When switching from Equalizer APO, takes that
     /// off first. The key belongs to SYSTEM: grant write access, change, restore exactly.
     /// </summary>
-    public static int SystemAttach(string guid, string logPath, bool undo = false, bool migrate = false)
+    public static int SystemAttach(string guid, string logPath, bool undo = false, bool migrate = false, string? resultPath = null)
     {
-        using var w = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
-        var path = $@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{guid}\FxProperties";
-        using var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-        var check = RegistryKeyPermissionCheck.ReadWriteSubTree;
-        RegistryKey? key = hklm.OpenSubKey(path, check, RegistryRights.ReadPermissions | RegistryRights.ChangePermissions);
-        if (key == null)
-        {
-            // Some mics have no FxProperties yet: create it (SYSTEM can).
-            using var parent = hklm.OpenSubKey(Path.GetDirectoryName(path)!, check, RegistryRights.CreateSubKey | RegistryRights.ReadKey);
-            parent?.CreateSubKey("FxProperties")?.Dispose();
-            key = hklm.OpenSubKey(path, check, RegistryRights.ReadPermissions | RegistryRights.ChangePermissions);
-        }
-        if (key == null) { w.WriteLine("SYSTEM couldn't open the mic's settings"); return 1; }
-        var acl = key.GetAccessControl();
-        var original = acl.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+        StreamWriter? w = null;
+        try { w = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true }; } catch { }
+        void Say(string line) { try { w?.WriteLine(line); } catch { } }
+        void Result(string r) { if (resultPath != null) try { File.WriteAllText(resultPath, r); } catch { } }
+        Say($"LOG SYSTEM step started as {WindowsIdentity.GetCurrent().Name} ({(undo ? "undo" : migrate ? "switch" : "attach")})");
         try
         {
-            acl.AddAccessRule(new RegistryAccessRule(WindowsIdentity.GetCurrent().User!, RegistryRights.SetValue | RegistryRights.QueryValues, AccessControlType.Allow));
-            key.SetAccessControl(acl);
-            using var wk = hklm.OpenSubKey(path, check, RegistryRights.SetValue | RegistryRights.QueryValues)!;
-            if (undo) WaveFixEngine.Detach(wk, guid);
-            else
+            var path = $@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{guid}\FxProperties";
+            using var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+            var check = RegistryKeyPermissionCheck.ReadWriteSubTree;
+            RegistryKey? key = hklm.OpenSubKey(path, check, RegistryRights.ReadPermissions | RegistryRights.ChangePermissions);
+            if (key == null)
             {
-                if (migrate) EqualizerApo.RemoveFromMic(wk, guid);
-                WaveFixEngine.Attach(wk);
+                // Some mics have no FxProperties yet: create it (SYSTEM can).
+                using var parent = hklm.OpenSubKey(Path.GetDirectoryName(path)!, check, RegistryRights.CreateSubKey | RegistryRights.ReadKey);
+                parent?.CreateSubKey("FxProperties")?.Dispose();
+                key = hklm.OpenSubKey(path, check, RegistryRights.ReadPermissions | RegistryRights.ChangePermissions);
             }
-            w.WriteLine(undo ? "SYSTEM detach done" : "SYSTEM attach done");
+            if (key == null) throw new InvalidOperationException("couldn't open the mic's settings");
+            using (key)
+            {
+                var acl = key.GetAccessControl();
+                var original = acl.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+                try
+                {
+                    acl.AddAccessRule(new RegistryAccessRule(WindowsIdentity.GetCurrent().User!, RegistryRights.SetValue | RegistryRights.QueryValues, AccessControlType.Allow));
+                    key.SetAccessControl(acl);
+                    using var wk = hklm.OpenSubKey(path, check, RegistryRights.SetValue | RegistryRights.QueryValues)
+                        ?? throw new InvalidOperationException("couldn't get write access to the mic's settings");
+                    if (undo) WaveFixEngine.Detach(wk, guid);
+                    else
+                    {
+                        if (migrate) EqualizerApo.RemoveFromMic(wk, guid);
+                        WaveFixEngine.Attach(wk);
+                    }
+                }
+                finally
+                {
+                    // Put the key's permissions back exactly as they were.
+                    var restore = key.GetAccessControl();
+                    restore.SetSecurityDescriptorSddlForm(original, AccessControlSections.Access);
+                    key.SetAccessControl(restore);
+                }
+            }
+            Say(undo ? "LOG SYSTEM detach done" : "LOG SYSTEM attach done");
+            Result("OK");
             return 0;
         }
-        catch (Exception ex) { w.WriteLine($"SYSTEM attach failed: {ex.Message}"); return 1; }
-        finally
+        catch (Exception ex)
         {
-            var restore = key.GetAccessControl();
-            restore.SetSecurityDescriptorSddlForm(original, AccessControlSections.Access);
-            key.SetAccessControl(restore);
-            key.Dispose();
+            Say($"LOG SYSTEM step failed: {ex}");
+            Result($"FAIL {ex.Message}");
+            return 1;
         }
+        finally { w?.Dispose(); }
     }
 }
