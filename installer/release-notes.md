@@ -19,6 +19,8 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 
 ## New in this version
 
+- **Copy details for help** (Setup page): copies what WaveFix and Windows report about your mic and the audio engine, including the engine's own log, to paste when something doesn't work.
+- Setup now waits up to 90 seconds for Windows audio to come back instead of failing after 20.
 - **Fix:** if Equalizer APO was on your mic but a different mic was selected when WaveFix started, setup could add WaveFix's engine without removing Equalizer APO and stop with "Windows didn't accept the mic setting". Setup now always takes Equalizer APO off the mic it's setting up, and cleans up a mic left half-switched by 0.8.2.
 - **Fix:** switching from Equalizer APO (or connecting the engine) could stop with "Windows didn't accept the mic setting" on some PCs, because setup gave up before the step that changes the mic had run. It now waits for that step to report back, and the setup log says exactly what went wrong if anything does.
 - **No more Equalizer APO.** WaveFix runs everything on its own audio engine now. Set up with Equalizer APO before? After this update the Setup page offers **one click** that moves your mic, settings and plugins to WaveFix's engine, puts your mic's original effects back, and uninstalls Equalizer APO (unless another device still uses it). Until you click it, nothing changes.

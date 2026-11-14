@@ -143,9 +143,25 @@ public static class WaveFixEngine
             apo.SetValue("APOInterface0", IidApo);
         }
         PrepareDataFolders();
+        RegisterEventSource();
         // Older engine versions that nothing loads any more.
         foreach (var old in Directory.EnumerateFiles(EngineDir, FilePrefix + "*.dll"))
             if (!string.Equals(old, dll, StringComparison.OrdinalIgnoreCase)) try { File.Delete(old); } catch { }
+    }
+
+    /// <summary>
+    /// The engine writes diagnostics to the Application event log as "WaveFix Engine". .NET's
+    /// message file shows each event's text as is.
+    /// </summary>
+    static void RegisterEventSource()
+    {
+        try
+        {
+            using var k = Hklm.CreateSubKey(@"SYSTEM\CurrentControlSet\Services\EventLog\Application\WaveFix Engine");
+            k.SetValue("EventMessageFile", @"%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll", RegistryValueKind.ExpandString);
+            k.SetValue("TypesSupported", 7, RegistryValueKind.DWord);
+        }
+        catch { /* events still get written, just without a pretty message */ }
     }
 
     /// <summary>

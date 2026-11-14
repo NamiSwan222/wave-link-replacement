@@ -11,6 +11,7 @@
 
 pub mod apo;
 pub mod chain;
+pub mod diag;
 pub mod vst;
 
 use std::ffi::c_void;
@@ -109,6 +110,12 @@ pub extern "system" fn DllGetClassObject(rclsid: *const GUID, riid: *const GUID,
     if rclsid.is_null() || riid.is_null() || ppv.is_null() { return E_POINTER; }
     unsafe { *ppv = std::ptr::null_mut(); }
     if unsafe { *rclsid } != CLSID_WAVEFIX_ENGINE { return CLASS_E_CLASSNOTAVAILABLE; }
+    static ANNOUNCED: std::sync::Once = std::sync::Once::new();
+    ANNOUNCED.call_once(|| diag::info(&format!(
+        "WaveFix Engine {} loaded from {} into {}",
+        env!("CARGO_PKG_VERSION"),
+        module_path().map(|p| p.display().to_string()).unwrap_or_default(),
+        std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())));
     let factory: IUnknown = Factory.into();
     unsafe { factory.query(riid, ppv) }
 }

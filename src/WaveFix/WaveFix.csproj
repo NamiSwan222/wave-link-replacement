@@ -9,7 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyTitle>WaveFix</AssemblyTitle>
     <Product>WaveFix</Product>
-    <Version>0.8.3</Version>
+    <Version>0.8.4</Version>
     <ApplicationIcon>Assets\WaveFix.ico</ApplicationIcon>
     <Company>NamiSwan222</Company>
     <Description>Wave Link replacement: mic effects that stay out of Discord streams</Description>

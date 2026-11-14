@@ -17,6 +17,8 @@ use windows::Win32::System::Com::CoTaskMemAlloc;
 use windows::core::{implement, Ref, Result, GUID};
 
 use crate::chain::{Chain, Config};
+use crate::diag;
+use std::sync::atomic::AtomicU64;
 
 pub const CLSID_WAVEFIX_ENGINE: GUID = GUID::from_u128(0x1F0E0A0C_41EE_4E1A_B2C4_0681D5344BDD);
 
@@ -27,6 +29,11 @@ struct Shared {
     /// Audio-thread calls in progress (the watcher waits for 0 before freeing an old chain).
     busy: AtomicU32,
     stop: AtomicBool,
+    // Counters the audio thread bumps (it never logs itself); the watcher reports them.
+    blocks: AtomicU64,
+    silent_blocks: AtomicU64,
+    last_frames: AtomicU32,
+    channel_mismatch: AtomicU64,
 }
 
 impl Shared {
@@ -61,7 +68,10 @@ impl Apo {
     pub fn new() -> Self {
         Apo {
             control: Mutex::new(Control { endpoint: None, watcher: None, channels: 0 }),
-            shared: Arc::new(Shared { current: AtomicPtr::new(std::ptr::null_mut()), busy: AtomicU32::new(0), stop: AtomicBool::new(false) }),
+            shared: Arc::new(Shared {
+                current: AtomicPtr::new(std::ptr::null_mut()), busy: AtomicU32::new(0), stop: AtomicBool::new(false),
+                blocks: AtomicU64::new(0), silent_blocks: AtomicU64::new(0), last_frames: AtomicU32::new(0), channel_mismatch: AtomicU64::new(0),
+            }),
             rt_channels: UnsafeCell::new(0),
         }
     }
@@ -110,30 +120,58 @@ fn watch(shared: Arc<Shared>, endpoint: Option<String>, channels: usize, rate: f
     let mut first = true;
     let mut beat = std::time::Instant::now() - Duration::from_secs(60);
     let mut warnings: Vec<String> = Vec::new();
+    let mut reported_flowing = false;
+    let mut reported_mismatch = false;
+    let mut status_error_logged = false;
+    diag::info(&format!("Processing started for mic {}: {channels} channel(s), {rate} Hz, up to {max_frames} frames; config {}",
+        endpoint.as_deref().unwrap_or("(unknown, using default)"), path.display()));
     while !shared.stop.load(Ordering::Acquire) {
         let stamp = std::fs::metadata(&path).ok().and_then(|m| Some((m.modified().ok()?, m.len())));
         if first || stamp != last {
             first = false;
             last = stamp;
+            let mut parse_error = None;
             let cfg = match std::fs::read_to_string(&path) {
-                Ok(text) => Config::parse(&text).unwrap_or_else(|e| { warnings = vec![format!("config: {e}")]; Config::default() }),
-                Err(_) => Config::default(), // no config yet: pass the mic through untouched
+                Ok(text) => Config::parse(&text).unwrap_or_else(|e| { parse_error = Some(format!("config: {e}")); Config::default() }),
+                Err(e) => {
+                    // No config yet: pass the mic through untouched.
+                    if e.kind() == std::io::ErrorKind::NotFound { diag::warn(&format!("No config yet at {} (the mic passes through untouched)", path.display())); }
+                    else { diag::error(&format!("Can't read the config {}: {e} (the mic passes through untouched)", path.display())); }
+                    Config::default()
+                }
             };
             let chain = Chain::build(&cfg, channels, rate, max_frames, root.as_deref());
             warnings = chain.warnings.clone();
+            if let Some(e) = parse_error { warnings.insert(0, e); }
+            if stamp.is_some() {
+                diag::info(&format!("Config loaded: {} stage(s), plugin folder {}{}", cfg.stages.len(),
+                    root.as_ref().map(|r| r.display().to_string()).unwrap_or_else(|| "(unknown)".into()),
+                    if warnings.is_empty() { String::new() } else { format!("; problems: {}", warnings.join("; ")) }));
+            }
             shared.publish(Some(Box::new(chain)));
             beat = std::time::Instant::now() - Duration::from_secs(60);
         }
+        if !reported_flowing && shared.blocks.load(Ordering::Relaxed) > 0 {
+            reported_flowing = true;
+            diag::info(&format!("Audio is flowing through the engine ({} frames per block{})", shared.last_frames.load(Ordering::Relaxed),
+                if shared.silent_blocks.load(Ordering::Relaxed) > 0 { ", some blocks marked silent" } else { "" }));
+        }
+        if !reported_mismatch && shared.channel_mismatch.load(Ordering::Relaxed) > 0 {
+            reported_mismatch = true;
+            diag::error("Audio blocks don't match the chain's channel count, so effects are skipped");
+        }
         if beat.elapsed() > Duration::from_secs(5) {
             beat = std::time::Instant::now();
-            write_status(&status, endpoint.as_deref(), channels, rate, &warnings);
+            if let Err(e) = write_status(&status, endpoint.as_deref(), channels, rate, &warnings) {
+                if !status_error_logged { status_error_logged = true; diag::warn(&format!("Can't write the status file {}: {e}", status.display())); }
+            }
         }
         std::thread::sleep(Duration::from_millis(200));
     }
 }
 
 /// Tells the app the engine is running on this mic (and any problems), so it can show it.
-fn write_status(path: &PathBuf, endpoint: Option<&str>, channels: usize, rate: f32, warnings: &[String]) {
+fn write_status(path: &PathBuf, endpoint: Option<&str>, channels: usize, rate: f32, warnings: &[String]) -> std::io::Result<()> {
     let secs = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let body = serde_json::json!({
         "engine": env!("CARGO_PKG_VERSION"),
@@ -144,9 +182,10 @@ fn write_status(path: &PathBuf, endpoint: Option<&str>, channels: usize, rate: f
         "time": secs,
         "warnings": warnings,
     });
-    if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
+    if let Some(dir) = path.parent() { std::fs::create_dir_all(dir)?; }
     let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, body.to_string()).is_ok() { let _ = std::fs::rename(&tmp, path); }
+    std::fs::write(&tmp, body.to_string())?;
+    std::fs::rename(&tmp, path)
 }
 
 /// Float32 PCM (what Windows' audio engine runs on internally) is the only format accepted.
@@ -154,6 +193,24 @@ fn float_format(t: &IAudioMediaType) -> Option<UNCOMPRESSEDAUDIOFORMAT> {
     let mut f = UNCOMPRESSEDAUDIOFORMAT::default();
     unsafe { t.GetUncompressedAudioFormat(&mut f).ok()?; }
     (f.guidFormatType == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT && f.dwBytesPerSampleContainer == 4 && f.dwSamplesPerFrame >= 1).then_some(f)
+}
+
+fn describe(t: Option<&IAudioMediaType>) -> String {
+    let Some(t) = t else { return "none".into() };
+    let mut f = UNCOMPRESSEDAUDIOFORMAT::default();
+    if unsafe { t.GetUncompressedAudioFormat(&mut f) }.is_err() { return "unreadable".into(); }
+    let kind = if f.guidFormatType == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT { "float" } else { "pcm/other" };
+    format!("{kind} {}-byte, {} ch, {} Hz", f.dwBytesPerSampleContainer, f.dwSamplesPerFrame, f.fFramesPerSecond)
+}
+
+static FORMAT_LOGS: AtomicU32 = AtomicU32::new(0);
+
+fn check_format_logged(what: &str, opposite: Ref<IAudioMediaType>, requested: Ref<IAudioMediaType>) -> Result<IAudioMediaType> {
+    let log = FORMAT_LOGS.fetch_add(1, Ordering::Relaxed) < 40;
+    let (req, opp) = if log { (describe(requested.ok().ok()), describe(opposite.ok().ok())) } else { (String::new(), String::new()) };
+    let r = check_format(opposite, requested);
+    if log { diag::info(&format!("{what}: requested {req}, opposite {opp} -> {}", if r.is_ok() { "accepted" } else { "refused" })); }
+    r
 }
 
 fn check_format(opposite: Ref<IAudioMediaType>, requested: Ref<IAudioMediaType>) -> Result<IAudioMediaType> {
@@ -193,15 +250,19 @@ impl IAudioProcessingObject_Impl for Apo_Impl {
                 c.endpoint = crate::endpoint_guid(devices);
             }
         }
+        let discovery = !pbydata.is_null() && cbdatasize as usize >= std::mem::size_of::<APOInitSystemEffects2>()
+            && unsafe { (*(pbydata as *const APOInitSystemEffects2)).InitializeForDiscoveryOnly.as_bool() };
+        diag::info(&format!("Initialize: mic {}, {cbdatasize} bytes of init data{}",
+            c.endpoint.as_deref().unwrap_or("(not identified)"), if discovery { ", discovery only" } else { "" }));
         Ok(())
     }
 
     fn IsInputFormatSupported(&self, opposite: Ref<IAudioMediaType>, requested: Ref<IAudioMediaType>) -> Result<IAudioMediaType> {
-        check_format(opposite, requested)
+        check_format_logged("Input format check", opposite, requested)
     }
 
     fn IsOutputFormatSupported(&self, opposite: Ref<IAudioMediaType>, requested: Ref<IAudioMediaType>) -> Result<IAudioMediaType> {
-        check_format(opposite, requested)
+        check_format_logged("Output format check", opposite, requested)
     }
 
     fn GetInputChannelCount(&self) -> Result<u32> {
@@ -211,9 +272,15 @@ impl IAudioProcessingObject_Impl for Apo_Impl {
 
 impl IAudioProcessingObjectConfiguration_Impl for Apo_Impl {
     fn LockForProcess(&self, nin: u32, ins: *const *const APO_CONNECTION_DESCRIPTOR, nout: u32, outs: *const *const APO_CONNECTION_DESCRIPTOR) -> Result<()> {
-        if nin != 1 || nout != 1 || ins.is_null() || outs.is_null() { return Err(windows::Win32::Foundation::E_INVALIDARG.into()); }
+        if nin != 1 || nout != 1 || ins.is_null() || outs.is_null() {
+            diag::error(&format!("LockForProcess refused: {nin} input(s), {nout} output(s)"));
+            return Err(windows::Win32::Foundation::E_INVALIDARG.into());
+        }
         let input = unsafe { &**ins };
-        let fmt = input.pFormat.as_ref().and_then(float_format).ok_or_else(|| windows::core::Error::from(APOERR_FORMAT_NOT_SUPPORTED))?;
+        let Some(fmt) = input.pFormat.as_ref().and_then(float_format) else {
+            diag::error("LockForProcess refused: the stream format isn't 32-bit float");
+            return Err(APOERR_FORMAT_NOT_SUPPORTED.into());
+        };
         let channels = fmt.dwSamplesPerFrame as usize;
         let rate = fmt.fFramesPerSecond;
         let max_frames = (input.u32MaxFrameCount as usize).clamp(64, 1 << 16);
@@ -232,6 +299,7 @@ impl IAudioProcessingObjectConfiguration_Impl for Apo_Impl {
 
     fn UnlockForProcess(&self) -> Result<()> {
         stop_watcher(&self.shared, &mut self.control.lock().unwrap());
+        diag::info(&format!("Processing stopped after {} block(s)", self.shared.blocks.load(Ordering::Relaxed)));
         Ok(())
     }
 }
@@ -247,6 +315,9 @@ impl IAudioProcessingObjectRT_Impl for Apo_Impl {
         let dst = output.pBuffer as *mut f32;
         if dst.is_null() { return; }
         let buf = unsafe { std::slice::from_raw_parts_mut(dst, n) };
+        self.shared.blocks.fetch_add(1, Ordering::Relaxed);
+        self.shared.last_frames.store(frames as u32, Ordering::Relaxed);
+        if input.u32BufferFlags == BUFFER_SILENT { self.shared.silent_blocks.fetch_add(1, Ordering::Relaxed); }
         if input.u32BufferFlags == BUFFER_SILENT || src.is_null() {
             // A silent buffer's contents are undefined; the chain may still add sound (soundboard).
             buf.fill(0.0);
@@ -261,6 +332,7 @@ impl IAudioProcessingObjectRT_Impl for Apo_Impl {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let chain = unsafe { &mut *chain };
                 if chain.channels() == channels { chain.process(buf); }
+                else { self.shared.channel_mismatch.fetch_add(1, Ordering::Relaxed); }
             }));
         }
         self.shared.busy.fetch_sub(1, Ordering::AcqRel);

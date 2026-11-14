@@ -449,11 +449,16 @@ public partial class MainWindow : Window
     {
         try
         {
-            var text = System.IO.File.Exists(Setup.LastLogPath) ? System.IO.File.ReadAllText(Setup.LastLogPath) : "(no setup log)";
-            Clipboard.SetText($"WaveFix {Updater.Current} setup log\n{text}");
+            Clipboard.SetText(Diagnostics.Collect(Mic.DeviceId));
             CopyLogText.Text = "Copied!";
         }
         catch { CopyLogText.Text = "Couldn't copy"; }
+    }
+
+    void CopyDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        try { Clipboard.SetText(Diagnostics.Collect(Mic.DeviceId)); Osd.Show(this, "\uE8C8", "Details copied: paste them in a message"); }
+        catch (Exception ex) { MessageBox.Show(this, $"Couldn't copy: {ex.Message}", "WaveFix"); }
     }
 
     void ShowSetupResult(bool good, string text, bool showHelp = false, bool pluginHelp = false)

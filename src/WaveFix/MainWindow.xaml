@@ -153,6 +153,11 @@
                                         ToolTip="Puts this mic's original Windows effect settings back (one permission prompt).">
                                     <TextBlock Text="Take the engine off this mic" FontSize="12.5" Foreground="{StaticResource SubText}"/>
                                 </Button>
+                                <Button Style="{StaticResource LinkButton}" Margin="16,0,0,0" VerticalAlignment="Center" Click="CopyDiagnostics_Click"
+                                        AutomationProperties.Name="Copy details for help"
+                                        ToolTip="Copies what WaveFix and Windows report about your mic and the engine, to paste when asking for help.">
+                                    <TextBlock Text="Copy details for help" FontSize="12.5" Foreground="{StaticResource SubText}"/>
+                                </Button>
                             </StackPanel>
                         </StackPanel>
                     </Border>

@@ -220,8 +220,7 @@ public static class Setup
             else
             {
                 Step(3, "RUN", "Restarting Windows audio (sound drops for a few seconds)…");
-                RestartAudio();
-                Step(3, "DONE", "Audio is back");
+                Step(3, "DONE", RestartAudio() ? "Audio is back" : "Windows audio is still starting; give it a moment");
             }
             Log("RESULT OK");
             return 0;
@@ -520,7 +519,8 @@ public static class Setup
         catch (Exception ex) { try { File.WriteAllText(logPath, ex.Message); } catch { } return 1; }
     }
 
-    static void RestartAudio()
+    /// <summary>Restarts Windows Audio. False if it's still starting after 90 s (not an error: it gets there).</summary>
+    static bool RestartAudio()
     {
         using var sc = new ServiceController("Audiosrv");
         try { if (sc.Status != ServiceControllerStatus.Stopped) { sc.Stop(); sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(12)); } }
@@ -533,7 +533,11 @@ public static class Setup
             Thread.Sleep(2000);
         }
         sc.Refresh();
-        if (sc.Status != ServiceControllerStatus.Running) { sc.Start(); sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(20)); }
+        if (sc.Status == ServiceControllerStatus.Running) return true;
+        if (sc.Status != ServiceControllerStatus.StartPending) sc.Start();
+        // Some PCs take a while to bring audio back (many devices, slow drivers): wait up to 90 s.
+        try { sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(90)); return true; }
+        catch (System.ServiceProcess.TimeoutException) { Log("LOG Windows Audio was still starting after 90 s"); return false; }
     }
 
     // ======================= SYSTEM step (--system-attach) =======================
