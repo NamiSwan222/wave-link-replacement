@@ -61,10 +61,17 @@ public static class VoiceFx
     /// <summary>
     /// Settings (name -> 0..1) for the main effects stage, or null when none of its effects is on.
     /// </summary>
-    public static Dictionary<string, float>? MainParams(PolishSettings polish, VoiceSettings voice)
+    public static Dictionary<string, float>? MainParams(PolishSettings polish, VoiceSettings voice, bool aiVoice = false, bool aiSilent = false)
     {
         var b = new Builder();
         bool any = false;
+        if (aiVoice)
+        {
+            // AI voice (RVC): the engine sends the voice to WaveFix and plays it back converted.
+            any = true;
+            b.On(RvcOn);
+            if (aiSilent) b.On(RvcMute);
+        }
         if (polish.Silencer)
         {
             any = true;
@@ -116,6 +123,9 @@ public static class VoiceFx
 /// <summary>Voice polish settings (Microphone page). Everything starts off.</summary>
 public sealed class PolishSettings
 {
+    /// <summary>Settings this version doesn't know (e.g. from a newer WaveFix): kept, so saving never drops them.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
+
     public bool Leveler { get; set; }
     /// <summary>0 = gentle, 100 = strong.</summary>
     public double LevelerAmount { get; set; } = 50;
@@ -130,6 +140,9 @@ public sealed class PolishSettings
 /// <summary>Custom voice tone: five bands, in dB.</summary>
 public sealed class CustomEq
 {
+    /// <summary>Settings this version doesn't know (e.g. from a newer WaveFix): kept, so saving never drops them.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
+
     /// <summary>Filter type and frequency of each band (peaking bands use Q 1).</summary>
     public static readonly (string Label, string Hint, string Type, int Hz)[] Bands =
     {
@@ -157,6 +170,9 @@ public sealed class CustomEq
 /// <summary>Voice changer settings. Sliders are shown in the app; the rest come from the preset.</summary>
 public sealed class VoiceSettings
 {
+    /// <summary>Settings this version doesn't know (e.g. from a newer WaveFix): kept, so saving never drops them.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
+
     public bool Enabled { get; set; }
     public string Preset { get; set; } = "deep";
 

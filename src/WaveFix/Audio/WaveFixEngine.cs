@@ -393,7 +393,7 @@ public static class WaveFixEngine
             if (q != null) o["q"] = q;
             stages.Add(o);
         }
-        static JsonObject Params(Dictionary<string, float> p) { var o = new JsonObject(); foreach (var (k, v) in p) o[k] = v; return o; }
+        static JsonObject Params(Dictionary<string, float> p) { var o = new JsonObject(); foreach (var (k, v) in p) if (float.IsFinite(v)) o[k] = v; return o; }
         JsonObject Vst(string path, PluginState? state)
         {
             var o = new JsonObject { ["type"] = "vst", ["path"] = path };
@@ -405,7 +405,11 @@ public static class WaveFixEngine
         // Rumble filter, then noise removal on the cleanest signal, tone, the user's plugins, voice
         // polish and voice changer, boost, then soundboard and peak protection.
         if (s.LowCut) Filter("hp", 80);
-        if (s.NoiseRemoval && HasNoisePlugin) stages.Add(Vst(NoisePlugin, s.NoiseState));
+        // Strong noise removal needs the current engine (an older one wouldn't know the stage and
+        // would skip the whole config): until it's updated, the standard one runs instead.
+        bool strong = s.NoiseModel == "strong" && !NeedsUpdate;
+        if (s.NoiseRemoval && strong) stages.Add(new JsonObject { ["type"] = "denoise", ["limit"] = Math.Round(Math.Clamp(s.NoiseStrengthDb, 6, 100)) });
+        else if (s.NoiseRemoval && HasNoisePlugin) stages.Add(Vst(NoisePlugin, s.NoiseState));
         if (s.EqPreset == EqPresets.Custom)
         {
             for (int i = 0; i < CustomEq.Bands.Length && i < s.CustomEq.Gains.Length; i++)
@@ -418,7 +422,8 @@ public static class WaveFixEngine
         else foreach (var f in EqPresets.Filters(s.EqPreset)) Filter(f.Kind, f.Hz, f.Gain, f.Q);
         foreach (var p in s.Plugins.Where(p => p.Enabled && File.Exists(p.Path)))
             stages.Add(Vst(p.Path, p.State));
-        if (VoiceFx.MainParams(s.Polish, s.Voice) is { } main) stages.Add(new JsonObject { ["type"] = "fx", ["params"] = Params(main) });
+        bool ai = s.AiVoice.Enabled && s.AiVoice.Current != null && Rvc.RvcEngine.Active;
+        if (VoiceFx.MainParams(s.Polish, s.Voice, ai, s.AiVoice.SilentWhenUnavailable) is { } main) stages.Add(new JsonObject { ["type"] = "fx", ["params"] = Params(main) });
         if (Math.Abs(s.VoiceBoostDb) > 0.05) stages.Add(new JsonObject { ["type"] = "gain", ["db"] = Math.Round(s.VoiceBoostDb, 1) });
         if (VoiceFx.OutputParams(s.Polish, s.Soundboard) is { } output) stages.Add(new JsonObject { ["type"] = "fx", ["params"] = Params(output) });
 

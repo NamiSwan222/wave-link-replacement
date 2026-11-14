@@ -520,6 +520,9 @@ public sealed class SoundboardEngine : IDisposable
 /// <summary>A sound on the soundboard (saved in settings.json).</summary>
 public sealed class SoundEntry : Observable
 {
+    /// <summary>Settings this version doesn't know (e.g. from a newer WaveFix): kept, so saving never drops them.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
+
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..10];
     public string Name { get; set; } = "";
     /// <summary>Copy of the file in %APPDATA%\WaveFix\Sounds.</summary>
@@ -535,6 +538,9 @@ public sealed class SoundEntry : Observable
 
 public sealed class SoundboardSettings
 {
+    /// <summary>Settings this version doesn't know (e.g. from a newer WaveFix): kept, so saving never drops them.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
+
     public bool Enabled { get; set; }
     /// <summary>How loud sounds are for everyone else, 0..100.</summary>
     public double Volume { get; set; } = 80;

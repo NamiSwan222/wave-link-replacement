@@ -36,6 +36,61 @@ CONFIGS = {
 }
 
 
+def make_attention_traceable():
+    """RVC's relative-position attention turns the sequence length into Python ints (max(), int()),
+    so a traced export only works at the length it was traced with. These replacements compute
+    exactly the same thing with index tensors, so the exported graph works at any length."""
+    import infer.module.attentions as A
+
+    def get_relative_embeddings(self, rel, length):
+        # Window of 2*length-1 relative positions centred on 0, zero outside the learned 2w+1.
+        w = self.window_size
+        pos = torch.arange(2 * length - 1, device=rel.device) - (length - 1) + w
+        valid = ((pos >= 0) & (pos <= 2 * w)).to(rel.dtype)
+        return rel[:, pos.clamp(0, 2 * w)] * valid[None, :, None]
+
+    def rel_to_abs(self, x):
+        # [b, h, l, 2l-1] -> [b, h, l, l]: out[i, j] = x[i, j - i + l - 1]
+        b, h, l, _ = x.size()
+        ar = torch.arange(l, device=x.device)
+        idx = (ar[None, :] - ar[:, None] + (l - 1)).expand(b, h, l, l)
+        return torch.gather(x, 3, idx)
+
+    def abs_to_rel(self, x):
+        # [b, h, l, l] -> [b, h, l, 2l-1]: out[i, k] = x[i, k + i - (l - 1)] where in range, else 0
+        b, h, l, _ = x.size()
+        i = torch.arange(l, device=x.device)[:, None]
+        k = torch.arange(2 * l - 1, device=x.device)[None, :]
+        src = k + i - (l - 1)
+        valid = ((src >= 0) & (src < l)).to(x.dtype)
+        out = torch.gather(x, 3, src.clamp(0, l - 1).expand(b, h, l, 2 * l - 1))
+        return out * valid
+
+    A.MultiHeadAttention._get_relative_embeddings = get_relative_embeddings
+    A.MultiHeadAttention._relative_position_to_absolute_position = rel_to_abs
+    A.MultiHeadAttention._absolute_position_to_relative_position = abs_to_rel
+
+
+def check_attention_patch():
+    """The replacements must give the same numbers as RVC's originals at every length."""
+    import importlib
+    import infer.module.attentions as A
+    orig = importlib.reload(A).MultiHeadAttention
+    saved = (orig._get_relative_embeddings, orig._relative_position_to_absolute_position, orig._absolute_position_to_relative_position)
+    make_attention_traceable()
+    new = A.MultiHeadAttention
+    g = torch.Generator().manual_seed(0)
+    self = type("S", (), {"window_size": 10})()
+    rel = torch.randn(1, 21, 96, generator=g)
+    for l in (1, 5, 10, 11, 12, 37, 200, 341):
+        x = torch.randn(2, 2, l, 2 * l - 1, generator=g)
+        y = torch.randn(2, 2, l, l, generator=g)
+        assert torch.allclose(saved[0](self, rel, l), new._get_relative_embeddings(self, rel, l)), ("embeddings", l)
+        assert torch.allclose(saved[1](self, x), new._relative_position_to_absolute_position(self, x)), ("rel->abs", l)
+        assert torch.allclose(saved[2](self, y), new._absolute_position_to_relative_position(self, y)), ("abs->rel", l)
+    print("attention replacements match RVC's originals at lengths 1..341")
+
+
 def build(version, config):
     from infer.module.models import SynthesizerTrnMs256NSFsid, SynthesizerTrnMs768NSFsid
     cls = SynthesizerTrnMs768NSFsid if version == "v2" else SynthesizerTrnMs256NSFsid
@@ -148,6 +203,7 @@ def main():
     args = ap.parse_args()
     sys.path.insert(0, args.rvc)
     os.makedirs(args.out, exist_ok=True)
+    check_attention_patch()
     torch.manual_seed(0)
 
     index = {}

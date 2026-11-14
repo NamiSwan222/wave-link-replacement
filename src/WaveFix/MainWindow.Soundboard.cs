@@ -18,6 +18,9 @@ public partial class MainWindow
     {
         var sb = _settings.Soundboard;
         _sounds = new ObservableCollection<SoundEntry>(sb.Sounds.Where(s => File.Exists(s.File)));
+        // Sounds whose file can't be found right now (e.g. a synced folder not ready yet) stay in
+        // the settings, so they come back instead of being dropped by the next save.
+        _missingSounds = sb.Sounds.Where(s => !File.Exists(s.File)).ToList();
         SoundList.ItemsSource = _sounds;
         _sounds.CollectionChanged += (_, _) => { EmptySounds.Visibility = _sounds.Count == 0 ? Visibility.Visible : Visibility.Collapsed; };
         EmptySounds.Visibility = _sounds.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -170,9 +173,11 @@ public partial class MainWindow
         }
     }
 
+    List<SoundEntry> _missingSounds = new();
+
     void SaveSounds()
     {
-        _settings.Soundboard.Sounds = _sounds.ToList();
+        _settings.Soundboard.Sounds = _sounds.Concat(_missingSounds).ToList();
         _settings.Save();
     }
 

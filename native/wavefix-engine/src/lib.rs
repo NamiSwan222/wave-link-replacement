@@ -12,6 +12,7 @@
 pub mod aggregate;
 pub mod apo;
 pub mod chain;
+pub mod denoise;
 pub mod diag;
 pub mod vst;
 

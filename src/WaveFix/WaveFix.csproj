@@ -9,7 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyTitle>WaveFix</AssemblyTitle>
     <Product>WaveFix</Product>
-    <Version>0.8.8</Version>
+    <Version>0.8.9</Version>
     <ApplicationIcon>Assets\WaveFix.ico</ApplicationIcon>
     <Company>NamiSwan222</Company>
     <Description>Wave Link replacement: mic effects that stay out of Discord streams</Description>
@@ -24,6 +24,11 @@
     <!-- Plus Jakarta Sans (SIL Open Font License, see Fonts/OFL.txt) -->
     <Resource Include="Fonts\*.ttf" />
     <Resource Include="Assets\WaveFix.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- RVC synthesizer templates (weights empty) for AI voices; made by tools/rvc/make_templates.py -->
+    <EmbeddedResource Include="Rvc\Templates\*.onnx;Rvc\Templates\templates.json" LogicalName="WaveFix.Rvc.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
@@ -52,6 +57,7 @@
   </Target>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="System.Management" Version="8.0.0" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />

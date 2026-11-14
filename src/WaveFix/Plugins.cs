@@ -6,14 +6,29 @@ namespace WaveFix;
 /// <summary>A user-added VST2 effect in the mic chain. Saved in settings.json.</summary>
 public sealed class PluginEntry : Observable
 {
+    /// <summary>Settings this version doesn't know (e.g. from a newer WaveFix): kept, so saving never drops them.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
+
     public string Name { get; set; } = "";
     public string Path { get; set; } = "";
 
     bool _enabled = true;
-    public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }
+    public bool Enabled { get => _enabled; set { if (Set(ref _enabled, value)) Raise(nameof(StatusText)); } }
 
+    PluginState? _state;
     /// <summary>Settings made in the plugin's window (null = the plugin's defaults).</summary>
-    public PluginState? State { get; set; }
+    public PluginState? State { get => _state; set { _state = value; Raise(); Raise(nameof(StatusText)); } }
+
+    // ---- For the list only (not saved) ----
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string StatusText => !Enabled ? "Off" : State == null || State.IsEmpty ? "On · default settings" : "On · your settings";
+
+    bool _expanded;
+    [System.Text.Json.Serialization.JsonIgnore] public bool Expanded { get => _expanded; set => Set(ref _expanded, value); }
+
+    int _position;
+    /// <summary>1-based place in the chain.</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public int Position { get => _position; set => Set(ref _position, value); }
 }
 
 /// <summary>
@@ -73,6 +88,42 @@ public static class PluginStore
     }
 
     public sealed record Found(string Name, string Path);
+
+    // ---- The last search's results, so the next one is instant ----
+
+    public sealed record ScanCache(DateTime Time, List<Found> Plugins);
+
+    static string CachePath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WaveFix", "plugin-scan.json");
+
+    /// <summary>Plugins found by earlier searches that are still there, or null if none were saved.</summary>
+    public static ScanCache? LoadCache()
+    {
+        try
+        {
+            if (!File.Exists(CachePath)) return null;
+            var c = System.Text.Json.JsonSerializer.Deserialize<ScanCache>(File.ReadAllText(CachePath));
+            if (c?.Plugins == null) return null;
+            return c with { Plugins = c.Plugins.Where(f => !string.IsNullOrEmpty(f.Path) && File.Exists(f.Path)).ToList() };
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Adds a search's results to the saved list (a full rescan replaces it).</summary>
+    public static void SaveCache(IEnumerable<Found> found, bool replace)
+    {
+        try
+        {
+            var all = replace ? new List<Found>() : LoadCache()?.Plugins ?? new List<Found>();
+            foreach (var f in found)
+                if (!all.Any(a => string.Equals(a.Path, f.Path, StringComparison.OrdinalIgnoreCase))) all.Add(f);
+            all = all.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(CachePath)!);
+            var tmp = CachePath + ".tmp";
+            File.WriteAllText(tmp, System.Text.Json.JsonSerializer.Serialize(new ScanCache(DateTime.Now, all)));
+            File.Move(tmp, CachePath, overwrite: true);
+        }
+        catch { /* only a convenience */ }
+    }
 
     /// <summary>Finds usable (64-bit VST2) plugins in the given folders. Runs on a background thread.</summary>
     public static List<Found> Scan(IEnumerable<string> folders, IEnumerable<string> skipPaths, CancellationToken ct = default)

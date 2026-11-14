@@ -31,6 +31,8 @@ pub enum Stage {
     /// Diagnostics: adds a sine tone (so a test can hear that the engine processes the mic, even
     /// a silent one). Not used by the app's normal settings.
     Tone { freq: f32, #[serde(default = "default_tone_db")] db: f32 },
+    /// Strong noise removal (DeepFilterNet 3, built in). limit: most noise removed, in dB.
+    Denoise { #[serde(default = "default_denoise_limit")] limit: f32 },
     /// A VST2 plugin from WaveFix's protected plugin folder.
     Vst {
         path: String,
@@ -40,6 +42,7 @@ pub enum Stage {
 }
 
 fn default_tone_db() -> f32 { -20.0 }
+fn default_denoise_limit() -> f32 { 100.0 }
 
 impl Config {
     pub fn parse(text: &str) -> Result<Config, String> {
@@ -98,6 +101,8 @@ enum Processor {
     Vst(Vec<VstInstance>),
     /// Test tone: phase, phase step per sample, amplitude.
     Tone(f32, f32, f32),
+    /// DeepFilterNet noise removal (mono; the result goes to every channel).
+    Denoise(Box<crate::denoise::Denoiser>),
 }
 
 /// A built chain for one channel count and sample rate.
@@ -142,6 +147,16 @@ impl Chain {
                     }
                     let dsps = (0..channels).map(|_| { let mut d = Dsp::new(); d.set_sample_rate(sr); d.reset(); d }).collect();
                     procs.push(Processor::Fx(dsps, Box::new(norm)));
+                }
+                Stage::Denoise { limit } => {
+                    if (sr - crate::denoise::RATE).abs() > 1.0 {
+                        warnings.push(format!("strong noise removal needs the mic at 48000 Hz (it's at {sr} Hz)"));
+                    } else {
+                        match crate::denoise::Denoiser::new(*limit) {
+                            Ok(d) => procs.push(Processor::Denoise(Box::new(d))),
+                            Err(e) => warnings.push(format!("strong noise removal couldn't start: {e}")),
+                        }
+                    }
                 }
                 Stage::Vst { path, chunk, params } => {
                     let state = PluginState { chunk: chunk.clone(), params: params.clone() };
@@ -210,6 +225,7 @@ impl Chain {
                         for plane in self.planes.iter_mut() { plane[f] += v; }
                     }
                 }
+                Processor::Denoise(d) => d.process(&mut self.planes, n),
                 Processor::Vst(instances) => {
                     let mut first = 0;
                     for inst in instances.iter_mut() {

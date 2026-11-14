@@ -31,8 +31,12 @@ public sealed class AppSettings
     /// </summary>
     public string? Engine { get; set; }
     /// <summary>True when settings.json existed at startup (an existing WaveFix user).</summary>
-    [System.Text.Json.Serialization.JsonIgnore] public bool Existed { get; private set; }
+    [System.Text.Json.Serialization.JsonIgnore] public bool Existed { get; set; }
     public bool NoiseRemoval { get; set; } = true;
+    /// <summary>"standard" (RNNoise plugin) or "strong" (DeepFilterNet, built into the engine).</summary>
+    public string NoiseModel { get; set; } = "standard";
+    /// <summary>Strong noise removal: the most it turns noise down, in dB (100 = all the way).</summary>
+    public double NoiseStrengthDb { get; set; } = 100;
     public bool LowCut { get; set; } = true;
     public string EqPreset { get; set; } = EqPresets.Flat;
     public double VoiceBoostDb { get; set; }
@@ -51,33 +55,84 @@ public sealed class AppSettings
     public CustomEq CustomEq { get; set; } = new();
     public VoiceSettings Voice { get; set; } = new();
     public SoundboardSettings Soundboard { get; set; } = new();
+    public Rvc.AiVoiceSettings AiVoice { get; set; } = new();
 
     static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WaveFix");
     static string FilePath => Path.Combine(Folder, "settings.json");
-    static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+    // Named literals (NaN, Infinity): a plugin can report a knob as NaN; that must never stop
+    // WaveFix from saving (it used to fail silently, losing every later change).
+    static readonly JsonSerializerOptions Json = new()
+    {
+        WriteIndented = true,
+        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,
+    };
 
+    /// <summary>The previous good settings (every save keeps one), used if settings.json is damaged.</summary>
+    static string BackupPath => FilePath + ".bak";
+
+    /// <summary>Settings this version doesn't know (e.g. from a newer WaveFix): kept, so saving never drops them.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
+
+    /// <summary>
+    /// Loads settings.json, or its backup if it's damaged (e.g. WaveFix was closed in the middle of
+    /// saving, as an update does). If both are unreadable, the damaged file is kept for rescue as
+    /// settings.corrupt-&lt;time&gt;.json before starting fresh, so nothing is silently overwritten.
+    /// </summary>
     public static AppSettings Load()
     {
-        try
+        foreach (var path in new[] { FilePath, BackupPath })
         {
-            if (File.Exists(FilePath))
+            try
             {
-                var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
+                if (!File.Exists(path)) continue;
+                var text = File.ReadAllText(path);
+                if (string.IsNullOrWhiteSpace(text)) throw new InvalidDataException("empty");
+                var s = JsonSerializer.Deserialize<AppSettings>(text, Json) ?? throw new InvalidDataException("null");
                 s.Existed = true;
+                if (path == BackupPath) ChangeLog.Write("settings.json was damaged: restored the previous settings from settings.json.bak");
                 return s;
             }
+            catch (Exception ex) { ChangeLog.Write($"Couldn't read {Path.GetFileName(path)}: {ex.Message}"); }
         }
-        catch { /* corrupt file: fall back to defaults */ }
+        if (File.Exists(FilePath))
+        {
+            var keep = Path.Combine(Folder, $"settings.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+            try { File.Copy(FilePath, keep, overwrite: false); ChangeLog.Write($"Kept the unreadable settings as {keep}"); } catch { }
+            return new AppSettings { Existed = true };
+        }
         return new AppSettings();
     }
 
+    /// <summary>
+    /// Saves without ever leaving a half-written file: writes settings.json.tmp, then swaps it in
+    /// and keeps the previous version as settings.json.bak.
+    /// </summary>
     public void Save()
     {
         try
         {
             Directory.CreateDirectory(Folder);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+            var tmp = FilePath + ".tmp";
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            using (var w = new StreamWriter(fs, new System.Text.UTF8Encoding(false)))
+                w.Write(JsonSerializer.Serialize(this, Json));
+            if (File.Exists(FilePath))
+            {
+                try { File.Replace(tmp, FilePath, BackupPath, ignoreMetadataErrors: true); }
+                catch (IOException) { File.Copy(FilePath, BackupPath, overwrite: true); File.Move(tmp, FilePath, overwrite: true); }
+            }
+            else File.Move(tmp, FilePath);
         }
-        catch { /* settings are a convenience; never crash over them */ }
+        catch (Exception ex)
+        {
+            // Never crash over settings, but say so: a save that keeps failing loses changes.
+            if (Environment.TickCount64 - _lastSaveError > 60_000)
+            {
+                _lastSaveError = Environment.TickCount64;
+                ChangeLog.Write($"Couldn't save settings: {ex.Message}");
+            }
+        }
     }
+
+    static long _lastSaveError = -60_000;
 }

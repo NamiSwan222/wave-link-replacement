@@ -9,6 +9,9 @@ serde_json = "1.0.154"
 wavefix-fx = { version = "1.0.0", path = "../wavefix-fx" }
 windows = { version = "0.62.2", features = ["Win32_Media_Audio_Apo", "Win32_Media_Audio", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_UI_Shell_PropertiesSystem", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_Variant", "Win32_Devices_Properties", "Win32_System_EventLog", "Win32_Security", "Win32_System_SystemInformation"] }
 windows-core = "0.62"
+# DeepFilterNet 3 noise removal (MIT/Apache-2.0), pinned to its v0.5.6 release; the model is built in.
+deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet", tag = "v0.5.6", default-features = false, features = ["tract", "default-model"] }
+ndarray = "0.15"
 
 [lib]
 name = "wavefix_engine"

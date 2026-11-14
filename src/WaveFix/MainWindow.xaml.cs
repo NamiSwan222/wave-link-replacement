@@ -55,6 +55,9 @@ public partial class MainWindow : Window
             PresetPanel.Children.Add(rb);
         }
         NoiseSwitch.IsChecked = _settings.NoiseRemoval;
+        NoiseStrengthSlider.Value = Math.Clamp(_settings.NoiseStrengthDb, 10, 100);
+        (_settings.NoiseModel == "strong" ? NoiseStrong : NoiseStandard).IsChecked = true;
+        UpdateNoiseModel();
         LowCutSwitch.IsChecked = _settings.LowCut;
         BoostSlider.Value = _settings.VoiceBoostDb;
         UpdateBoostLabel();
@@ -80,8 +83,11 @@ public partial class MainWindow : Window
 
         // Plugins page
         PluginList.ItemsSource = _plugins;
-        _plugins.CollectionChanged += (_, _) => EmptyPlugins.Visibility = _plugins.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _plugins.CollectionChanged += (_, _) => { EmptyPlugins.Visibility = _plugins.Count == 0 ? Visibility.Visible : Visibility.Collapsed; RenumberPlugins(); };
         EmptyPlugins.Visibility = _plugins.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        RenumberPlugins();
+        OrphanList.ItemsSource = _orphans;
+        RefreshOrphans();
 
         // Shortcuts page
         _hotkeys = new HotkeyManager(this);
@@ -99,6 +105,7 @@ public partial class MainWindow : Window
         ShortcutList.ItemsSource = _shortcutRows;
         _saveSoon.Tick += (_, _) => { _saveSoon.Stop(); _settings.Save(); };
         InitSoundboard();
+        InitAiVoices();
 
         _meterTimer.Tick += (_, _) =>
         {
@@ -144,6 +151,7 @@ public partial class MainWindow : Window
         PageMic.Visibility = NavMic.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageVoice.Visibility = NavVoice.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageSoundboard.Visibility = NavSoundboard.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        PageAi.Visibility = NavAi.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageMixer.Visibility = NavMixer.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PagePlugins.Visibility = NavPlugins.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageShortcuts.Visibility = NavShortcuts.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -167,6 +175,41 @@ public partial class MainWindow : Window
     // These run only on a real click (Click, not Checked/Unchecked), and each switch only ever
     // writes its own setting, so nothing that changes a switch in code can overwrite a choice.
     void NoiseSwitch_Click(object sender, RoutedEventArgs e) => SetNoiseRemoval(NoiseSwitch.IsChecked == true, "switch clicked");
+
+    void NoiseModel_Checked(object sender, RoutedEventArgs e)
+    {
+        if (NoiseStrong == null || NoiseStandard == null || StrongNoisePanel == null) return; // during InitializeComponent
+        var model = NoiseStrong.IsChecked == true ? "strong" : "standard";
+        if (_settings.NoiseModel == model) { UpdateNoiseModel(); return; }
+        _settings.NoiseModel = model;
+        ChangeLog.Write($"Noise removal type: {model}");
+        UpdateNoiseModel();
+        ApplyEffects();
+    }
+
+    void NoiseStrength_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (NoiseStrengthValue == null) return;
+        UpdateNoiseModel();
+        if (_loading) return;
+        _settings.NoiseStrengthDb = NoiseStrengthSlider.Value;
+        ApplySoon();
+    }
+
+    void UpdateNoiseModel()
+    {
+        // The slider reports its first value while the window is still being built.
+        if (NoiseStrong == null || StrongNoisePanel == null || StandardNoisePanel == null || NoiseStrengthValue == null || StrongNoiseNote == null) return;
+        bool strong = NoiseStrong.IsChecked == true;
+        StrongNoisePanel.Visibility = strong ? Visibility.Visible : Visibility.Collapsed;
+        StandardNoisePanel.Visibility = strong ? Visibility.Collapsed : Visibility.Visible;
+        double v = NoiseStrengthSlider.Value;
+        NoiseStrengthValue.Text = v >= 100 ? "All of it" : $"Up to {v:0} dB";
+        if (strong && WaveFixEngine.NeedsUpdate)
+            StrongNoiseNote.Text = "Needs the latest audio engine: until you click Update the audio engine (one Windows prompt), Standard runs instead.";
+        else
+            StrongNoiseNote.Text = "DeepFilterNet, an AI model built into WaveFix's audio engine. Lower keeps a little room sound, which can sound more natural. Adds about 40 ms of delay.";
+    }
     void LowCutSwitch_Click(object sender, RoutedEventArgs e) => SetLowCut(LowCutSwitch.IsChecked == true, "switch clicked");
 
     void SetNoiseRemoval(bool on, string why)
@@ -717,8 +760,10 @@ public partial class MainWindow : Window
             if (_plugins.Any(p => string.Equals(p.Path, entry.Path, StringComparison.OrdinalIgnoreCase)))
             { ShowPluginError($"{entry.Name} is already in your list."); return false; }
             _plugins.Add(entry);
+            ChangeLog.Write($"Plugin added: {entry.Name} ({entry.Path})");
             ShowPluginError(null);
             ApplyEffects();
+            RefreshOrphans();
             return true;
         }
         catch (Exception ex) { ShowPluginError($"Couldn't add the plugin: {ex.Message}"); return false; }
@@ -729,7 +774,41 @@ public partial class MainWindow : Window
     readonly ObservableCollection<PluginStore.Found> _found = new();
     CancellationTokenSource? _scanCts;
 
-    void ScanPlugins_Click(object sender, RoutedEventArgs e) => _ = RunScan(PluginStore.DefaultScanFolders(), "the usual plugin folders");
+    /// <summary>Shows the last search's results straight away; only searches when there are none.</summary>
+    void ScanPlugins_Click(object sender, RoutedEventArgs e)
+    {
+        if (PluginStore.LoadCache() is { Plugins.Count: > 0 } c)
+        {
+            _scanCts?.Cancel();
+            ShowFound(c.Plugins, $"from your last search ({When(c.Time)})");
+            ScanStatus.Text += " Installed something new? Click Scan again.";
+        }
+        else _ = RunScan(PluginStore.DefaultScanFolders(), "the usual plugin folders");
+    }
+
+    void ScanAgain_Click(object sender, RoutedEventArgs e) => _ = RunScan(PluginStore.DefaultScanFolders(), "the usual plugin folders", replaceSaved: true);
+
+    static string When(DateTime t) =>
+        t.Date == DateTime.Today ? $"today at {t:HH:mm}" : t.Date == DateTime.Today.AddDays(-1) ? $"yesterday at {t:HH:mm}" : $"on {t:d MMM}";
+
+    /// <summary>Lists found plugins, minus the built-in noise removal and ones already in the list.</summary>
+    void ShowFound(IReadOnlyList<PluginStore.Found> found, string? source = null)
+    {
+        ScanResults.ItemsSource = _found;
+        ScanCard.Visibility = Visibility.Visible;
+        ShowPluginError(null);
+        var have = new HashSet<string>(_plugins.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+        var noise = new[] { _engine.NoisePlugin, _engine.NoisePlugin.Replace("_mono", "_stereo") };
+        _found.Clear();
+        foreach (var f in found.Where(f => !have.Contains(f.Name) && !noise.Contains(f.Path, StringComparer.OrdinalIgnoreCase))) _found.Add(f);
+        ScanSearchRow.Visibility = _found.Count > 8 ? Visibility.Visible : Visibility.Collapsed;
+        ScanSearch_Changed(ScanSearch, null!);
+        int already = found.Count - _found.Count;
+        string from = source == null ? "" : $" {source}";
+        ScanStatus.Text = _found.Count == 0
+            ? (already > 0 ? "Every plugin found is already in your list." : "No 64-bit VST2 plugins found. If yours are somewhere else, use Look in a folder.")
+            : $"{_found.Count} plugin{(_found.Count == 1 ? "" : "s")} you can add{from}" + (already > 0 ? $" ({already} already added)." : ".");
+    }
 
     void ScanFolder_Click(object sender, RoutedEventArgs e)
     {
@@ -738,7 +817,7 @@ public partial class MainWindow : Window
         _ = RunScan(new[] { dlg.FolderName }, $"\"{dlg.FolderName}\"");
     }
 
-    async Task RunScan(IReadOnlyList<string> folders, string where)
+    async Task RunScan(IReadOnlyList<string> folders, string where, bool replaceSaved = false)
     {
         _scanCts?.Cancel();
         var cts = _scanCts = new CancellationTokenSource();
@@ -750,26 +829,22 @@ public partial class MainWindow : Window
         ScanButtonText.Text = "Scanning…";
         ScanStatus.Text = $"Looking through {where}…";
 
-        // Skip the built-in noise removal and plugins already in the list (by name: we keep copies).
-        var have = new HashSet<string>(_plugins.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
         var skip = new[] { _engine.NoisePlugin, _engine.NoisePlugin.Replace("_mono", "_stereo") };
         try
         {
             var found = await Task.Run(() => PluginStore.Scan(folders, skip, cts.Token), cts.Token);
             if (cts.IsCancellationRequested) return;
-            foreach (var f in found.Where(f => !have.Contains(f.Name))) _found.Add(f);
-            int already = found.Count - _found.Count;
-            ScanStatus.Text = folders.Count == 0
-                ? "No standard plugin folders exist on this PC. Use Scan a folder… to pick where your plugins are."
-                : _found.Count == 0
-                    ? (already > 0 ? "Every plugin found is already in your list." : $"No 64-bit VST2 plugins found in {where}. If yours are somewhere else, use Scan a folder.")
-                    : $"Found {_found.Count} plugin{(_found.Count == 1 ? "" : "s")} you can add" + (already > 0 ? $" ({already} already added)." : ".");
+            // Saved, so the next search shows them straight away (a folder search adds to the list).
+            PluginStore.SaveCache(found, replaceSaved);
+            ShowFound(found);
+            if (folders.Count == 0) ScanStatus.Text = "No standard plugin folders exist on this PC. Use Look in a folder… to pick where your plugins are.";
+            else if (_found.Count == 0 && found.Count == 0) ScanStatus.Text = $"No 64-bit VST2 plugins found in {where}. If yours are somewhere else, use Look in a folder.";
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { ScanStatus.Text = $"The scan stopped: {ex.Message}"; }
         finally
         {
-            if (_scanCts == cts) { ScanButton.IsEnabled = true; ScanButtonText.Text = "Scan for plugins"; }
+            if (_scanCts == cts) { ScanButton.IsEnabled = true; ScanButtonText.Text = "Find plugins on this PC"; }
         }
     }
 
@@ -785,7 +860,7 @@ public partial class MainWindow : Window
         _scanCts?.Cancel();
         ScanCard.Visibility = Visibility.Collapsed;
         ScanButton.IsEnabled = true;
-        ScanButtonText.Text = "Scan for plugins";
+        ScanButtonText.Text = "Find plugins on this PC";
     }
 
     void ShowPluginError(string? text)
@@ -794,7 +869,53 @@ public partial class MainWindow : Window
         PluginErrorText.Text = text ?? "";
     }
 
-    void PluginToggle_Click(object sender, RoutedEventArgs e) => ApplyEffects();
+    void PluginToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is PluginEntry p) ChangeLog.Write($"Plugin {p.Name} {(p.Enabled ? "on" : "off")} (switch clicked)");
+        ApplyEffects();
+    }
+
+    void PluginMore_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is PluginEntry p) p.Expanded = !p.Expanded;
+    }
+
+    void RenumberPlugins()
+    {
+        for (int i = 0; i < _plugins.Count; i++) _plugins[i].Position = i + 1;
+    }
+
+    // ----- Installed (in WaveFix's plugin folder) but not in the list -----
+
+    readonly ObservableCollection<PluginStore.Found> _orphans = new();
+
+    void RefreshOrphans()
+    {
+        _orphans.Clear();
+        try
+        {
+            if (Directory.Exists(PluginStore.Folder))
+                foreach (var f in Directory.GetFiles(PluginStore.Folder, "*.dll").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+                    if (!_plugins.Any(p => string.Equals(p.Path, f, StringComparison.OrdinalIgnoreCase)))
+                        _orphans.Add(new PluginStore.Found(Path.GetFileNameWithoutExtension(f), f));
+        }
+        catch { }
+        OrphanCard.Visibility = _orphans.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    async void AddOrphan_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is PluginStore.Found f) await AddPluginFile(f.Path);
+    }
+
+    void ScanSearch_Changed(object sender, TextChangedEventArgs? e)
+    {
+        var q = ScanSearch.Text.Trim();
+        ScanSearchHint.Visibility = q.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var view = System.Windows.Data.CollectionViewSource.GetDefaultView(_found);
+        view.Filter = q.Length == 0 ? null : o => o is PluginStore.Found f
+            && q.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(w => f.Name.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
 
     void PluginUp_Click(object sender, RoutedEventArgs e) => MovePlugin(sender, -1);
     void PluginDown_Click(object sender, RoutedEventArgs e) => MovePlugin(sender, +1);
@@ -805,14 +926,19 @@ public partial class MainWindow : Window
         int i = _plugins.IndexOf(p), j = i + delta;
         if (i < 0 || j < 0 || j >= _plugins.Count) return;
         _plugins.Move(i, j);
+        ChangeLog.Write($"Plugin {p.Name} moved {(delta < 0 ? "up" : "down")}");
         ApplyEffects();
     }
 
     void PluginRemove_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is not PluginEntry p) return;
+        if (MessageBox.Show(this, $"Remove {p.Name} from your mic?\n\nIts settings are forgotten. It stays installed, so you can add it back from \"Installed, not in your list\".",
+                "WaveFix", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
         _plugins.Remove(p);
+        ChangeLog.Write($"Plugin removed: {p.Name}");
         ApplyEffects(); // take it out of the chain first so the engine releases it
+        RefreshOrphans();
     }
 
     // ---------- Shortcuts ----------
@@ -944,6 +1070,7 @@ public partial class MainWindow : Window
         _meterTimer.Stop(); _slowTimer.Stop(); _applySoon.Stop(); _saveSoon.Stop();
         _settings.Save();
         _soundboard.Dispose(); _pttTimer.Stop(); _updateTimer.Stop();
+        StopAiVoiceOnExit();
         _hotkeys.Dispose();
         Mic.Dispose(); Mixer.Dispose();
         base.OnClosed(e);

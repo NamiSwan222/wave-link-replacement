@@ -68,6 +68,7 @@
                     <RadioButton x:Name="NavSetup" Style="{StaticResource NavItem}" GroupName="nav" Content="Setup" Tag="&#xE713;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavMic" Style="{StaticResource NavItem}" GroupName="nav" Content="Microphone" Tag="&#xE720;" IsChecked="True" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavVoice" Style="{StaticResource NavItem}" GroupName="nav" Content="Voice changer" Tag="&#xE8D6;" Checked="Nav_Checked"/>
+                    <RadioButton x:Name="NavAi" Style="{StaticResource NavItem}" GroupName="nav" Content="AI voices" Tag="&#xE99A;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavSoundboard" Style="{StaticResource NavItem}" GroupName="nav" Content="Soundboard" Tag="&#xE7F6;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavMixer" Style="{StaticResource NavItem}" GroupName="nav" Content="App mixer" Tag="&#xE767;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavPlugins" Style="{StaticResource NavItem}" GroupName="nav" Content="Plugins" Tag="&#xEA86;" Checked="Nav_Checked"/>
@@ -291,7 +292,23 @@
                                         <TextBlock Text="Hides keyboard clicks, fans and room noise between your words." Style="{StaticResource Hint}" Margin="0,3,0,0"/>
                                     </StackPanel>
                                 </CheckBox>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+                                <WrapPanel Margin="0,0,0,8">
+                                    <RadioButton x:Name="NoiseStandard" Style="{StaticResource ToneChoice}" GroupName="noisemodel" Content="Standard" Tag="Light on your PC" Checked="NoiseModel_Checked"
+                                                 AutomationProperties.Name="Standard noise removal"/>
+                                    <RadioButton x:Name="NoiseStrong" Style="{StaticResource ToneChoice}" GroupName="noisemodel" Content="Strong" Tag="Cleaner, more natural" Checked="NoiseModel_Checked"
+                                                 AutomationProperties.Name="Strong noise removal"/>
+                                </WrapPanel>
+                                <StackPanel x:Name="StrongNoisePanel" Margin="0,0,0,18" Visibility="Collapsed">
+                                    <DockPanel Margin="0,0,0,2">
+                                        <TextBlock x:Name="NoiseStrengthValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="How much noise to remove" Style="{StaticResource Label}"/>
+                                    </DockPanel>
+                                    <Slider x:Name="NoiseStrengthSlider" Minimum="10" Maximum="100" SmallChange="5" LargeChange="10" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            ValueChanged="NoiseStrength_Changed" AutomationProperties.Name="How much noise to remove"/>
+                                    <TextBlock x:Name="StrongNoiseNote" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                               Text="DeepFilterNet, an AI model built into WaveFix's audio engine. Lower keeps a little room sound, which can sound more natural. Adds about 40 ms of delay."/>
+                                </StackPanel>
+                                <StackPanel x:Name="StandardNoisePanel" Orientation="Horizontal" Margin="0,0,0,18">
                                     <Button Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Click="NoiseSettings_Click"
                                             AutomationProperties.Name="Adjust noise removal">
                                         <StackPanel Orientation="Horizontal">
@@ -474,6 +491,105 @@
             </ScrollViewer>
 
             <!-- ===== Soundboard ===== -->
+            <!-- ===== AI voices ===== -->
+            <ScrollViewer x:Name="PageAi" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26"
+                          AllowDrop="True" DragOver="AiVoices_DragOver" Drop="AiVoices_Drop">
+                <StackPanel>
+                    <TextBlock Text="AI voices" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Text="Sound like a different person with an RVC voice model. It runs on your PC, inside WaveFix: your voice isn't sent anywhere." Style="{StaticResource PageSubtitle}"/>
+
+                    <Border x:Name="AiNotice" CornerRadius="12" Background="{StaticResource WarnSoft}" Padding="14,12" Margin="0,0,0,16" Visibility="Collapsed">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" VerticalAlignment="Top" Click="CloseAiNotice_Click" AutomationProperties.Name="Dismiss">
+                                <TextBlock Text="&#xE711;" Style="{StaticResource Icon}" FontSize="10" Foreground="{StaticResource SubText}"/>
+                            </Button>
+                            <TextBlock x:Name="AiNoticeText" Style="{StaticResource Hint}" Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                        <CheckBox x:Name="AiSwitch" Style="{StaticResource Switch}" Click="AiSwitch_Click" AutomationProperties.Name="AI voice">
+                            <StackPanel>
+                                <TextBlock Text="AI voice" FontSize="16" FontWeight="Bold"/>
+                                <TextBlock x:Name="AiStateText" Style="{StaticResource Hint}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </CheckBox>
+                    </Border>
+
+                    <Border x:Name="AiDownloadCard" Style="{StaticResource Card}" Margin="0,0,0,20">
+                        <StackPanel>
+                            <TextBlock Text="One-time download" Style="{StaticResource CardTitle}" Margin="0,0,0,6"/>
+                            <TextBlock x:Name="AiDownloadText" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,14"/>
+                            <ProgressBar x:Name="AiDownloadProgress" Height="6" Minimum="0" Maximum="1" Margin="0,0,0,14" Visibility="Collapsed"
+                                         Foreground="{StaticResource Primary}" Background="{StaticResource Surface}" BorderThickness="0"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="AiDownloadButton" Style="{StaticResource PrimaryButton}" Height="38" Padding="16,0" Click="AiDownload_Click" AutomationProperties.Name="Download AI voice support">
+                                    <TextBlock Text="Download" FontWeight="Bold" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
+                                </Button>
+                                <Button x:Name="AiCancelButton" Style="{StaticResource SoftButton}" Height="38" Padding="14,0" Margin="8,0,0,0" Click="AiCancel_Click" Visibility="Collapsed" AutomationProperties.Name="Cancel download">
+                                    <TextBlock Text="Cancel" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,14">
+                                <Button x:Name="AiAddButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Height="38" Padding="16,0" Click="AiAdd_Click" AutomationProperties.Name="Add a voice model">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" FontSize="12" Foreground="White" Margin="0,0,8,0"/>
+                                        <TextBlock Text="Add voice model" FontWeight="Bold" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock Text="Voices" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <TextBlock x:Name="AiEmpty" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="No voices yet. Click Add voice model (or drop a file here) and pick an RVC model: the .pth file, usually 50 to 60 MB. v1 and v2 models at 32, 40 or 48 kHz work. Index files (.index) aren't needed."/>
+                            <WrapPanel x:Name="AiVoiceList"/>
+                            <TextBlock x:Name="AiImportText" Style="{StaticResource Hint}" Margin="0,6,0,0" Visibility="Collapsed"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,2">
+                                <TextBlock x:Name="AiPitchValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                <TextBlock Text="Pitch" Style="{StaticResource Label}"/>
+                            </DockPanel>
+                            <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="Saved per voice. Deep voice into a high-voiced model: about +12. High voice into a deep-voiced model: about -12."/>
+                            <Slider x:Name="AiPitchSlider" Minimum="-24" Maximum="24" TickFrequency="1" IsSnapToTickEnabled="True" SmallChange="1" LargeChange="12"
+                                    ValueChanged="AiPitch_Changed" AutomationProperties.Name="AI voice pitch"/>
+                            <CheckBox x:Name="AiGpuSwitch" Style="{StaticResource Switch}" Margin="0,18,0,0" Click="AiOptions_Click" AutomationProperties.Name="Use my graphics card">
+                                <StackPanel>
+                                    <TextBlock Text="Use my graphics card" Style="{StaticResource Label}"/>
+                                    <TextBlock Text="Much faster, so the delay is shorter. Turn off if your graphics card has problems." Style="{StaticResource Hint}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </CheckBox>
+                            <CheckBox x:Name="AiSilentSwitch" Style="{StaticResource Switch}" Margin="0,14,0,0" Click="AiOptions_Click" AutomationProperties.Name="Never send my real voice">
+                                <StackPanel>
+                                    <TextBlock Text="Never send my real voice" Style="{StaticResource Label}"/>
+                                    <TextBlock Text="If the AI voice stops (it's starting up, your PC can't keep up, or WaveFix closed), your mic goes silent instead of falling back to your normal voice." Style="{StaticResource Hint}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </CheckBox>
+                        </StackPanel>
+                    </Border>
+
+                    <Border CornerRadius="12" Background="#16162B" Padding="14,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Grid.Column="1" Style="{StaticResource Hint}" TextWrapping="Wrap"
+                                       Text="AI voices add a delay (about 0.4 s with a graphics card, more without one). The voice changer and other effects still apply on top. Only use voice models you're allowed to, and don't use someone's voice to pretend to be them."/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
             <ScrollViewer x:Name="PageSoundboard" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26"
                           AllowDrop="True" DragOver="Soundboard_DragOver" Drop="Soundboard_Drop">
                 <StackPanel>
@@ -654,27 +770,52 @@
                                     Click="ScanPlugins_Click" AutomationProperties.Name="Scan this PC for plugins">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="14" Margin="0,0,10,0"/>
-                                    <TextBlock x:Name="ScanButtonText" Text="Scan for plugins" FontWeight="Bold" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="ScanButtonText" Text="Find plugins on this PC" FontWeight="Bold" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </Button>
                             <Button Style="{StaticResource PrimaryButton}" Height="44" Padding="18,0"
                                     Click="AddPlugin_Click" AutomationProperties.Name="Add a plugin file">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" FontSize="14" Foreground="White" Margin="0,0,10,0"/>
-                                    <TextBlock Text="Add plugin" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Add a file" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </Button>
                         </StackPanel>
                         <StackPanel>
                             <TextBlock Text="Plugins" Style="{StaticResource PageTitle}"/>
-                            <TextBlock Text="Add your own VST effects to your mic. They run after Sound cleanup and voice tone, before Voice polish and Mic boost, top to bottom." Style="{StaticResource PageSubtitle}"/>
+                            <TextBlock Text="Your own VST effects, added to your mic." Style="{StaticResource PageSubtitle}"/>
                         </StackPanel>
                     </DockPanel>
 
                     <Border x:Name="PluginError" CornerRadius="12" Background="{StaticResource WarnSoft}" Padding="14,12" Margin="0,0,0,14" Visibility="Collapsed">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE7BA;" Style="{StaticResource Icon}" Foreground="{StaticResource Warn}" VerticalAlignment="Top" Margin="0,1,10,0"/>
-                            <TextBlock x:Name="PluginErrorText" Style="{StaticResource Hint}" Foreground="{StaticResource Text}" MaxWidth="700"/>
+                            <TextBlock x:Name="PluginErrorText" Style="{StaticResource Hint}" Foreground="{StaticResource Text}" MaxWidth="700" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Plugins already installed in WaveFix's folder but not in the list -->
+                    <Border x:Name="OrphanCard" Style="{StaticResource Card}" Margin="0,0,0,16" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Installed, not in your list" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
+                            <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                       Text="You added these before (they're still installed), but they aren't in your mic chain. Add one back with a click, no Windows prompt."/>
+                            <ItemsControl x:Name="OrphanList">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource SoftButton}" Height="36" Padding="12,0" Margin="0,0,8,8" Click="AddOrphan_Click" Tag="{Binding}"
+                                                AutomationProperties.Name="{Binding Name, StringFormat=Add {0} back}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" FontSize="11" Margin="0,0,8,0"/>
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </StackPanel>
                     </Border>
 
@@ -685,36 +826,118 @@
                                 <Button DockPanel.Dock="Right" Style="{StaticResource SoftButton}" Height="34" Padding="12,0" Click="CloseScan_Click" AutomationProperties.Name="Close scan results">
                                     <TextBlock Text="Done" FontWeight="SemiBold" FontSize="13"/>
                                 </Button>
+                                <Button x:Name="ScanAgainButton" DockPanel.Dock="Right" Style="{StaticResource SoftButton}" Height="34" Padding="12,0" Margin="0,0,8,0" Click="ScanAgain_Click" AutomationProperties.Name="Scan again">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE72C;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,8,0"/>
+                                        <TextBlock Text="Scan again" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
                                 <Button DockPanel.Dock="Right" Style="{StaticResource SoftButton}" Height="34" Padding="12,0" Margin="0,0,8,0" Click="ScanFolder_Click" AutomationProperties.Name="Scan a specific folder">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,8,0"/>
-                                        <TextBlock Text="Scan a folder…" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Look in a folder…" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
                                 <TextBlock Text="Found on this PC" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
                             </DockPanel>
-                            <TextBlock x:Name="ScanStatus" Style="{StaticResource Hint}" Margin="0,0,0,12"/>
-                            <ItemsControl x:Name="ScanResults">
+                            <TextBlock x:Name="ScanStatus" Style="{StaticResource Hint}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                            <Grid x:Name="ScanSearchRow" Margin="0,0,0,12" Visibility="Collapsed">
+                                <TextBox x:Name="ScanSearch" Style="{StaticResource SearchBox}" TextChanged="ScanSearch_Changed" AutomationProperties.Name="Search found plugins"/>
+                                <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="13" Foreground="{StaticResource SubText}" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                <TextBlock x:Name="ScanSearchHint" Text="Search by name, like Pro-Q or compressor" Foreground="{StaticResource SubText}" FontSize="13.5" Margin="35,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                            </Grid>
+                            <ScrollViewer MaxHeight="380" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl x:Name="ScanResults">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border CornerRadius="10" Background="{StaticResource Surface}" Padding="14,8" Margin="0,0,6,6">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Path}" Style="{StaticResource Hint}" FontSize="11.5" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1" Style="{StaticResource PrimaryButton}" Height="32" Padding="14,0" Click="AddFound_Click" Tag="{Binding}"
+                                                            AutomationProperties.Name="{Binding Name, StringFormat=Add {0}}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" FontSize="11" Foreground="White" Margin="0,0,8,0"/>
+                                                            <TextBlock Text="Add" FontWeight="Bold" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- The chain -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="Your mic chain" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
+                            <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,14"
+                                       Text="Sound cleanup and voice tone → your plugins, top to bottom → voice polish, voice changer and mic boost. Changes apply to your mic straight away."/>
+
+                            <StackPanel x:Name="EmptyPlugins" HorizontalAlignment="Center" Margin="0,14,0,10">
+                                <TextBlock Text="&#xEA86;" Style="{StaticResource Icon}" FontSize="30" Foreground="{StaticResource SubText}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="No plugins yet" FontSize="15" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,10,0,4"/>
+                                <TextBlock Text="Click Find plugins on this PC, or Add a file and pick a 64-bit VST2 effect (.dll)." Style="{StaticResource Hint}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+
+                            <ItemsControl x:Name="PluginList">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border CornerRadius="12" Background="{StaticResource Surface}" Padding="14,10" Margin="0,0,0,8">
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
-                                                    <TextBlock Text="{Binding Path}" Style="{StaticResource Hint}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
-                                                </StackPanel>
-                                                <Button Grid.Column="1" Style="{StaticResource PrimaryButton}" Height="36" Padding="14,0" Click="AddFound_Click" Tag="{Binding}"
-                                                        AutomationProperties.Name="{Binding Name, StringFormat=Add {0}}">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" FontSize="12" Foreground="White" Margin="0,0,8,0"/>
-                                                        <TextBlock Text="Add" FontWeight="Bold" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
+                                        <Border CornerRadius="12" Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="14,10" Margin="0,0,0,8">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="28" Height="28" CornerRadius="14" Background="{StaticResource PrimarySoft}" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Position}" FontWeight="Bold" FontSize="12.5" Foreground="#C7D2FE" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Margin="14,0,12,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Name}" Style="{StaticResource Label}" FontSize="14.5" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding StatusText}" Style="{StaticResource Hint}" FontSize="12" Margin="0,2,0,0"/>
                                                     </StackPanel>
-                                                </Button>
-                                            </Grid>
+                                                    <Button Grid.Column="2" Style="{StaticResource SoftButton}" Height="36" Padding="14,0" Click="PluginSettings_Click" Tag="{Binding}"
+                                                            ToolTip="Open the plugin's own window" AutomationProperties.Name="{Binding Name, StringFormat=Open {0}}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,8,0"/>
+                                                            <TextBlock Text="Open" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <CheckBox Grid.Column="3" Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Click="PluginToggle_Click" Margin="4,0,8,0" VerticalAlignment="Center"
+                                                              ToolTip="On or off" AutomationProperties.Name="{Binding Name, StringFormat=Turn {0} on or off}"/>
+                                                    <Button Grid.Column="4" Style="{StaticResource SoftButton}" Width="36" Height="36" Click="PluginMore_Click" Tag="{Binding}"
+                                                            ToolTip="More: move, reset, remove" AutomationProperties.Name="{Binding Name, StringFormat=More for {0}}">
+                                                        <TextBlock Text="&#xE712;" Style="{StaticResource Icon}" FontSize="13"/>
+                                                    </Button>
+                                                </Grid>
+                                                <WrapPanel Margin="42,10,0,2" Visibility="{Binding Expanded, Converter={StaticResource BoolToVis}}">
+                                                    <Button Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Margin="0,0,8,0" Click="PluginUp_Click" Tag="{Binding}" AutomationProperties.Name="{Binding Name, StringFormat=Move {0} up}">
+                                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE70E;" Style="{StaticResource Icon}" FontSize="11" Margin="0,0,8,0"/><TextBlock Text="Move up" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel>
+                                                    </Button>
+                                                    <Button Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Margin="0,0,8,0" Click="PluginDown_Click" Tag="{Binding}" AutomationProperties.Name="{Binding Name, StringFormat=Move {0} down}">
+                                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="11" Margin="0,0,8,0"/><TextBlock Text="Move down" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel>
+                                                    </Button>
+                                                    <Button Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Margin="0,0,8,0" Click="PluginReset_Click" Tag="{Binding}" AutomationProperties.Name="{Binding Name, StringFormat=Reset {0} to defaults}">
+                                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE777;" Style="{StaticResource Icon}" FontSize="11" Margin="0,0,8,0"/><TextBlock Text="Reset to defaults" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel>
+                                                    </Button>
+                                                    <Button Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Click="PluginRemove_Click" Tag="{Binding}" AutomationProperties.Name="{Binding Name, StringFormat=Remove {0}}">
+                                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource Bad}" Margin="0,0,8,0"/><TextBlock Text="Remove" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Bad}" VerticalAlignment="Center"/></StackPanel>
+                                                    </Button>
+                                                </WrapPanel>
+                                            </StackPanel>
                                         </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
@@ -722,69 +945,11 @@
                         </StackPanel>
                     </Border>
 
-                    <Border x:Name="EmptyPlugins" Style="{StaticResource Card}" Margin="0,0,0,12">
-                        <StackPanel HorizontalAlignment="Center" Margin="0,22">
-                            <TextBlock Text="&#xEA86;" Style="{StaticResource Icon}" FontSize="34" Foreground="{StaticResource SubText}" HorizontalAlignment="Center"/>
-                            <TextBlock Text="No plugins yet" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,12,0,4"/>
-                            <TextBlock Text="Click Add plugin and pick a 64-bit VST2 effect (.dll), like a compressor or de-esser." Style="{StaticResource Hint}" HorizontalAlignment="Center"/>
-                        </StackPanel>
-                    </Border>
-
-                    <ItemsControl x:Name="PluginList">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Style="{StaticResource Card}" Padding="18,16" Margin="0,0,0,12">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Border Width="42" Height="42" CornerRadius="12" Background="{StaticResource PrimarySoft}" VerticalAlignment="Center">
-                                            <TextBlock Text="&#xEA86;" Style="{StaticResource Icon}" FontSize="18" Foreground="#C7D2FE" HorizontalAlignment="Center"/>
-                                        </Border>
-                                        <StackPanel Grid.Column="1" Margin="14,0,16,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Name}" Style="{StaticResource Label}" FontSize="15" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Text="{Binding Path}" Style="{StaticResource Hint}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="0,3,0,0"/>
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Click="PluginToggle_Click" Margin="0,0,14,0"
-                                                      AutomationProperties.Name="{Binding Name, StringFormat=Turn {0} on or off}"/>
-                                            <Button Style="{StaticResource SoftButton}" Height="40" Padding="12,0" Margin="0,0,6,0" Click="PluginSettings_Click" Tag="{Binding}"
-                                                    ToolTip="Open the plugin's settings window" AutomationProperties.Name="{Binding Name, StringFormat=Settings for {0}}">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,8,0"/>
-                                                    <TextBlock Text="Settings" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
-                                                </StackPanel>
-                                            </Button>
-                                            <Button Style="{StaticResource SoftButton}" Width="40" Height="40" Margin="0,0,6,0" Click="PluginReset_Click" Tag="{Binding}" ToolTip="Reset to the plugin's defaults"
-                                                    AutomationProperties.Name="{Binding Name, StringFormat=Reset {0} to defaults}">
-                                                <TextBlock Text="&#xE777;" Style="{StaticResource Icon}" FontSize="13"/>
-                                            </Button>
-                                            <Button Style="{StaticResource SoftButton}" Width="40" Height="40" Click="PluginUp_Click" Tag="{Binding}" ToolTip="Move up"
-                                                    AutomationProperties.Name="{Binding Name, StringFormat=Move {0} up}">
-                                                <TextBlock Text="&#xE70E;" Style="{StaticResource Icon}" FontSize="12"/>
-                                            </Button>
-                                            <Button Style="{StaticResource SoftButton}" Width="40" Height="40" Margin="6,0,0,0" Click="PluginDown_Click" Tag="{Binding}" ToolTip="Move down"
-                                                    AutomationProperties.Name="{Binding Name, StringFormat=Move {0} down}">
-                                                <TextBlock Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="12"/>
-                                            </Button>
-                                            <Button Style="{StaticResource SoftButton}" Width="40" Height="40" Margin="6,0,0,0" Click="PluginRemove_Click" Tag="{Binding}" ToolTip="Remove"
-                                                    AutomationProperties.Name="{Binding Name, StringFormat=Remove {0}}">
-                                                <TextBlock Text="&#xE74D;" Style="{StaticResource Icon}" FontSize="14"/>
-                                            </Button>
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <Border CornerRadius="12" Background="#16162B" Padding="14,12" Margin="0,6,0,0">
+                    <Border CornerRadius="12" Background="#16162B" Padding="14,12">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
-                            <TextBlock Style="{StaticResource Hint}" MaxWidth="700"
-                                       Text="Plugins run on their default settings for now. WaveFix copies each plugin to C:\ProgramData\WaveFix\Plugins so Windows' audio engine can load it. Only 64-bit VST2 (.dll) plugins work; VST3 isn't supported by the engine."/>
+                            <TextBlock Style="{StaticResource Hint}" MaxWidth="700" TextWrapping="Wrap"
+                                       Text="Settings you make in a plugin's window are saved and used on your mic. WaveFix copies each plugin to C:\Program Files\WaveFix\Plugins (Windows asks once), the only place its audio engine loads code from. 64-bit VST2 plugins (.dll) only."/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

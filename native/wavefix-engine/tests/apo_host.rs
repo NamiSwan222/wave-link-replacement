@@ -209,6 +209,9 @@ fn channel(v: &[f32], channels: usize, c: usize) -> impl Iterator<Item = f32> + 
 #[test]
 fn engine_behaves_like_a_windows_audio_effect() {
     unsafe { std::env::set_var("WAVEFIX_ENGINE_DATA", data_dir()); }
+    // Never touch this PC's real bridge file (C:\ProgramData\WaveFix\Engine\bridge.bin, present
+    // wherever WaveFix runs): once mapped it would stay mapped for the rest of the test.
+    unsafe { std::env::set_var("ProgramData", data_dir().join("pd-none")); }
     let _ = std::fs::remove_file(data_dir().join("config").join("default.json"));
 
     // Plain (non-aggregated) creation still works too.

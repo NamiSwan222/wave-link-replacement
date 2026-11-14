@@ -9,6 +9,9 @@ namespace WaveFix;
 /// </summary>
 public sealed class PluginState
 {
+    /// <summary>Settings this version doesn't know (e.g. from a newer WaveFix): kept, so saving never drops them.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
+
     public string? ChunkData { get; set; }
     public Dictionary<string, float>? Params { get; set; }
 
@@ -143,7 +146,11 @@ public sealed unsafe class VstPlugin : IDisposable
             return new PluginState { ChunkData = Convert.ToBase64String(new ReadOnlySpan<byte>((void*)chunk, size)) };
         }
         var map = new Dictionary<string, float>();
-        for (int i = 0; i < NumParams; i++) map[ParamName(i)] = GetParam(i);
+        for (int i = 0; i < NumParams; i++)
+        {
+            float v = GetParam(i);
+            map[ParamName(i)] = float.IsFinite(v) ? Math.Clamp(v, 0f, 1f) : 0f; // VST2 values are 0..1
+        }
         return new PluginState { Params = map };
     }
 
