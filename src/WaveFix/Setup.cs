@@ -190,8 +190,11 @@ public static class Setup
             else
             {
                 Step(2, "RUN", Migrate ? "Switching your mic to WaveFix's engine…" : "Connecting the engine to your mic…");
-                WaveFixEngine.BackupMic(guid, fromEqualizerApo: EqualizerApo.IsOnMic("x.{" + guid + "}"));
-                var result = RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\"" + (Migrate ? " --migrate" : ""));
+                // Whatever the app thought: if Equalizer APO is on this mic, it comes off first.
+                bool eapoOnMic = EqualizerApo.IsOnMic("x.{" + guid + "}");
+                if (eapoOnMic && !Migrate) Log("LOG Equalizer APO is on this mic: taking it off");
+                WaveFixEngine.BackupMic(guid, fromEqualizerApo: eapoOnMic);
+                var result = RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\"" + (eapoOnMic ? " --migrate" : ""));
                 if (!attached())
                 {
                     Log($"LOG mic settings now: {DescribeMic(guid)}");
@@ -199,7 +202,7 @@ public static class Setup
                     throw new InvalidOperationException(result.StartsWith("FAIL") ? result[5..] : "Windows didn't accept the mic setting.");
                 }
                 changed = true;
-                if (Migrate && EqualizerApo.Installed)
+                if ((Migrate || eapoOnMic) && EqualizerApo.Installed)
                 {
                     if (EqualizerApo.UsedElsewhere(guid))
                         Log("LOG Equalizer APO is still used by another device, so it was left installed");
@@ -209,7 +212,7 @@ public static class Setup
                         EqualizerApo.Uninstall(m => Log($"LOG {m}"));
                     }
                 }
-                Step(2, "DONE", Migrate ? (EqualizerApo.Installed ? "Switched (Equalizer APO kept for your other devices)" : "Switched") : "Connected");
+                Step(2, "DONE", Migrate || eapoOnMic ? (EqualizerApo.Installed ? "Switched (Equalizer APO kept for your other devices)" : "Switched") : "Connected");
             }
 
             // 4. Restart Windows Audio (only if something changed)

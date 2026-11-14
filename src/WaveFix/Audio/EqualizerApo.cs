@@ -115,12 +115,17 @@ public static class EqualizerApo
             }
             else if (IsEapo(fx.GetValue(name))) fx.DeleteValue(name, false);
         }
-        foreach (var i in new[] { 13, 14, 15 })
+        // Composite lists (13 stream, 14 mode, 15 endpoint): Equalizer APO's entry is replaced by
+        // the effect it displaced in the matching single slot (5, 6, 7), or dropped if there was none.
+        foreach (var (i, single) in new[] { (13, 5), (14, 6), (15, 7) })
         {
             var name = $"{FxClsid},{i}";
             if (fx.GetValue(name) is string[] list && list.Any(IsEapo))
             {
-                var rest = list.Where(c => !IsEapo(c)).ToArray();
+                var original = child?.GetValue($"{FxClsid},{single}") as string;
+                bool haveOriginal = original != null && original != "!VALUE" && !IsEapo(original) && !original.Trim('{', '}').All(c => c is '0' or '-');
+                var rest = list.SelectMany(c => IsEapo(c) ? (haveOriginal ? new[] { original! } : Array.Empty<string>()) : new[] { c })
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                 if (rest.Length > 0) fx.SetValue(name, rest, RegistryValueKind.MultiString);
                 else fx.DeleteValue(name, false);
             }

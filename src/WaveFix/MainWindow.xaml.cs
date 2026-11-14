@@ -125,7 +125,7 @@ public partial class MainWindow : Window
         foreach (var t in Setup.StepTitles) _setupSteps.Add(new SetupStepRow(t));
         SetupSteps.ItemsSource = _setupSteps;
         RefreshSetupChecklist();
-        Mic.DeviceChanged += RefreshSetupChecklist;
+        Mic.DeviceChanged += () => { ChooseEngine(); RefreshSetupChecklist(); UpdateStatus(); };
 
         _loading = false;
         if (Mic.DeviceId != null) _settings.MicDeviceId = Mic.DeviceId;
@@ -286,11 +286,19 @@ public partial class MainWindow : Window
     /// </summary>
     void ChooseEngine()
     {
-        bool onEapo = _settings.Engine == "eapo" || (Mic.DeviceId != null && EqualizerApo.IsOnMic(Mic.DeviceId))
+        // Checked for the mic picked right now (and again whenever another is picked). "wavefix" is
+        // only saved after a setup run succeeds, never from a guess at startup.
+        bool onEapo = (Mic.DeviceId != null && EqualizerApo.IsOnMic(Mic.DeviceId))
+            || (_settings.Engine != "wavefix" && (EqualizerApo.Installed || _settings.Engine == "eapo"))
             || _settings.Plugins.Any(p => !p.Path.StartsWith(WaveFixEngine.PluginDir, StringComparison.OrdinalIgnoreCase));
+        bool was = Setup.Migrate;
         Setup.Migrate = onEapo && _settings.Existed;
-        if (Setup.Migrate) ChangeLog.Write("Setup from before WaveFix's engine found: switching it over");
-        if (!Setup.Migrate && _settings.Engine != "wavefix") { _settings.Engine = "wavefix"; _settings.Save(); }
+        if (Setup.Migrate && !was) ChangeLog.Write($"Setup from before WaveFix's engine found on {Mic.DeviceId}: switching it over");
+        if (Setup.Migrate != was && _setupSteps.Count > 0)
+        {
+            _setupSteps.Clear();
+            foreach (var t in Setup.StepTitles) _setupSteps.Add(new SetupStepRow(t));
+        }
         SetupNote.Text = Setup.Migrate
             ? "WaveFix now has its own audio engine, so it no longer needs Equalizer APO. Windows asks for permission once; your sound drops for a few seconds while Windows audio restarts. Your settings and plugins come along, your mic's original effects are put back, and Equalizer APO is uninstalled (unless another device still uses it)."
             : "Windows will ask for permission once. Your sound drops for a few seconds at the end while Windows audio restarts. WaveFix installs its own audio engine and adds itself after any effects your mic already has (they keep working). It downloads the RNNoise plugin from GitHub and checks it against a known fingerprint. Steps that are already done are skipped.";
@@ -405,6 +413,7 @@ public partial class MainWindow : Window
         if (ok)
         {
             if (Setup.Migrate) FinishSwitch();
+            else if (_settings.Engine != "wavefix") { _settings.Engine = "wavefix"; _settings.Save(); }
             _settings.MicDeviceId = micId;
             ApplyEffects(); // write the effect chain for this mic now that the engine is in place
             ShowSetupResult(true, "All done! Your effects now work in Discord, OBS and every other app. Head to Microphone to tune your sound.");
