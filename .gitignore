@@ -1,0 +1,12 @@
+# Recordings can contain the user's voice: never commit them
+*.wav
+
+# Third-party plugin binaries are downloaded, not redistributed
+plugins/
+*.dll
+
+# .NET build output
+bin/
+obj/
+*.user
+.vs/
