@@ -28,8 +28,10 @@ public partial class MainWindow
         _aiSyncing = true;
         AiAutoGateSwitch.IsChecked = Ai.AutoGate;
         AiGateSlider.Value = Math.Clamp(Ai.GateDb, -70, -20);
+        SyncAiDelayControls();
         _aiSyncing = false;
         UpdateAiGateText();
+        _ai.Manual = CurrentManualDelay();
         InitHearMyself();
         _ai.StatusChanged += () => Dispatcher.BeginInvoke(UpdateAiState);
         _ai.Failed += () => Dispatcher.BeginInvoke(() => { ApplyEffects(); UpdateAiState(); });
@@ -236,6 +238,86 @@ public partial class MainWindow
         UpdateAiGateText();
     }
 
+    // ---------------- Manual delay ----------------
+
+    System.Windows.Threading.DispatcherTimer? _aiDelayApply;
+
+    ManualDelay? CurrentManualDelay() =>
+        Ai.ManualDelay ? new ManualDelay(Ai.BlockMs, Ai.ContextSec, Ai.CrossfadeMs, Ai.SafetyMs) : null;
+
+    /// <summary>Puts the saved delay settings on the controls (call with _aiSyncing set).</summary>
+    void SyncAiDelayControls()
+    {
+        AiManualDelaySwitch.IsChecked = Ai.ManualDelay;
+        AiBlockSlider.Value = Math.Clamp(Ai.BlockMs, 20, 500);
+        AiContextSlider.Value = Math.Clamp(Ai.ContextSec, 0.2, 3);
+        AiCrossfadeSlider.Value = Math.Clamp(Ai.CrossfadeMs, 10, 80);
+        AiSafetySlider.Value = Math.Clamp(Ai.SafetyMs, 0, 200);
+        UpdateAiDelayText();
+    }
+
+    void UpdateAiDelayText()
+    {
+        if (AiBlockValue == null || AiSafetyValue == null || AiDelayModeHint == null) return;
+        bool manual = AiManualDelaySwitch.IsChecked == true;
+        AiManualDelayPanel.Visibility = manual ? Visibility.Visible : Visibility.Collapsed;
+        AiDelayModeHint.Text = manual
+            ? "Delay = block + conversion time + crossfade + safety margin. The AI voice status shows the result."
+            : "Off: WaveFix picks the shortest delay your PC keeps up with comfortably. Turn on to go lower by hand.";
+        AiBlockValue.Text = $"{AiBlockSlider.Value:0} ms";
+        AiContextValue.Text = $"{AiContextSlider.Value:0.0} s";
+        AiCrossfadeValue.Text = $"{AiCrossfadeSlider.Value:0} ms";
+        AiSafetyValue.Text = $"{AiSafetySlider.Value:0} ms";
+    }
+
+    void AiManualDelay_Click(object sender, RoutedEventArgs e)
+    {
+        Ai.ManualDelay = AiManualDelaySwitch.IsChecked == true;
+        ChangeLog.Write($"AI voice: set the delay myself {(Ai.ManualDelay ? "on" : "off")}");
+        UpdateAiDelayText();
+        ApplyAiDelay();
+    }
+
+    void AiDelay_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        UpdateAiDelayText();
+        if (_aiSyncing || _loading || AiSafetySlider == null) return;
+        Ai.BlockMs = AiBlockSlider.Value;
+        Ai.ContextSec = Math.Round(AiContextSlider.Value, 1);
+        Ai.CrossfadeMs = AiCrossfadeSlider.Value;
+        Ai.SafetyMs = AiSafetySlider.Value;
+        ApplyAiDelay();
+    }
+
+    void AiDelayLowest_Click(object sender, RoutedEventArgs e)
+    {
+        // The lowest delay that held without running late in live tests on a graphics card
+        // (about 130 ms in all): smaller blocks barely help, since the graphics card's occasional
+        // slow conversion sets the floor; the running-late check adds 10 ms at a time if needed.
+        Ai.ManualDelay = true; Ai.BlockMs = 20; Ai.ContextSec = 0.5; Ai.CrossfadeMs = 20; Ai.SafetyMs = 30;
+        _aiSyncing = true; SyncAiDelayControls(); _aiSyncing = false;
+        ApplyAiDelay();
+    }
+
+    /// <summary>Saves and applies the delay settings, after the slider has settled (a rebuild takes a moment).</summary>
+    void ApplyAiDelay()
+    {
+        _settings.Save();
+        _aiDelayApply ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _aiDelayApply.Stop();
+        _aiDelayApply.Tick -= AiDelayApply_Tick;
+        _aiDelayApply.Tick += AiDelayApply_Tick;
+        _aiDelayApply.Start();
+    }
+
+    void AiDelayApply_Tick(object? sender, EventArgs e)
+    {
+        _aiDelayApply!.Stop();
+        var m = CurrentManualDelay();
+        ChangeLog.Write(m == null ? "AI voice: delay automatic" : $"AI voice: delay settings block {m.BlockMs:0} ms, context {m.ContextSec:0.0} s, crossfade {m.CrossfadeMs:0} ms, safety {m.SafetyMs:0} ms");
+        _ai.SetManual(m);
+    }
+
     void AiGate_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (AiGateValue == null || AiGateHint == null) return;
@@ -285,11 +367,15 @@ public partial class MainWindow
     {
         Ai.AutoGate = true; Ai.GateDb = -50;
         _ai.AutoGate = true; _ai.GateDb = -50;
+        bool wasManual = Ai.ManualDelay;
+        Ai.ManualDelay = false; Ai.BlockMs = 120; Ai.ContextSec = 1.0; Ai.CrossfadeMs = 20; Ai.SafetyMs = 20;
+        if (wasManual) _ai.SetManual(null);
         if (Ai.Current is { } v) { v.LoudnessMix = 0; v.IndexRate = 0.5; v.SpeakerId = 0; if (RvcEngine.Active) _ai.SetVoice(v); }
         _settings.Save();
         _aiSyncing = true;
         AiAutoGateSwitch.IsChecked = true;
         AiGateSlider.Value = -50;
+        SyncAiDelayControls();
         _aiSyncing = false;
         UpdateAiGateText();
         RefreshAiAdvanced();

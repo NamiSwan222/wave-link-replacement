@@ -116,17 +116,24 @@ public sealed class RvcPipeline
     /// <summary>Quieter than this (dBFS) counts as silence (stops breathing and hum being "sung").</summary>
     public double GateDb { get; set; } = -50;
 
-    public RvcPipeline(RvcModels models, int sampleRate, double blockSec, double extraSec)
+    /// <summary>
+    /// Delay built into the conversion itself (samples): the crossfade tail and the overlap search
+    /// window sit between the newest input and the newest audio that can be played.
+    /// </summary>
+    public int BuiltInDelay => _solaBuf + _solaSearch;
+
+    public RvcPipeline(RvcModels models, int sampleRate, double blockSec, double extraSec, double crossfadeSec = 0.04)
     {
         _m = models;
         _sr = sampleRate;
         _zc = sampleRate / 100;
         BlockFrame = Math.Max(1, (int)Math.Round(blockSec * _sr / _zc)) * _zc;
-        int crossfade = (int)Math.Round(0.05 * _sr / _zc) * _zc;
-        _solaBuf = Math.Min(crossfade, 4 * _zc);
+        // RVC's own GUI reserves the full crossfade time but only uses up to 40 ms of it; the
+        // unused part was 10 ms of pure delay. Reserve exactly what's used.
+        _solaBuf = Math.Clamp((int)Math.Round(crossfadeSec * _sr / _zc), 1, 8) * _zc;
         _solaSearch = _zc;
         _extra = (int)Math.Round(extraSec * _sr / _zc) * _zc;
-        _total = _extra + crossfade + _solaSearch + BlockFrame;
+        _total = _extra + _solaBuf + _solaSearch + BlockFrame;
         _total16 = 160 * _total / _zc;
         _block16 = 160 * BlockFrame / _zc;
         _inputWav = new float[_total];
@@ -355,6 +362,9 @@ public sealed class RvcPipeline
 /// Runs AI voices in the background: reads your voice from the audio engine (the bridge file),
 /// converts it, and writes it back for the engine to play a fixed delay later.
 /// </summary>
+/// <summary>Delay settings chosen by hand (milliseconds, context in seconds).</summary>
+public sealed record ManualDelay(double BlockMs, double ContextSec, double CrossfadeMs, double SafetyMs);
+
 public sealed class RvcEngine : IDisposable
 {
     Thread? _thread;
@@ -364,7 +374,11 @@ public sealed class RvcEngine : IDisposable
     readonly object _lock = new();
 
     public bool PreferGpu { get; set; } = true;
-    public double BlockSeconds { get; set; } = 0.25;
+    /// <summary>Manual delay settings (null = pick automatically). Applied by rebuilding the pipeline.</summary>
+    public volatile ManualDelay? Manual;
+    volatile bool _rebuild;
+    /// <summary>Applies new manual delay settings (or automatic, with null) while running.</summary>
+    public void SetManual(ManualDelay? m) { Manual = m; _rebuild = true; }
     /// <summary>Noise gate for the voice sent to the model (dBFS); applied from the next block.</summary>
     public volatile float GateDb = -50;
     public volatile bool AutoGate = true;
@@ -423,6 +437,8 @@ public sealed class RvcEngine : IDisposable
             int rate = 0;
             long pos = -1;
             int delay = 0;
+            ManualDelay? manual = null;
+            bool shaped = false; // the models have run at some audio size already
             double worstMs = 0;
             int late = 0;
             var recent = new Queue<double>(); // the last few seconds of conversion times (ms)
@@ -449,18 +465,32 @@ public sealed class RvcEngine : IDisposable
                     Thread.Sleep(20);
                     continue;
                 }
-                if (pipe == null || pr != rate)
+                if (pipe == null || pr != rate || _rebuild)
                 {
+                    _rebuild = false;
                     rate = pr;
-                    SetStatus("Finding the shortest delay this PC can keep up with…");
-                    bool gpu = models.Device == "graphics card";
-                    (pipe, worstMs) = ChooseBlock(models, rate, gpu ? 1.5 : 0.75, bridge, sw);
+                    manual = Manual;
+                    // A graphics card stays fast only for the first audio size it was given: after a
+                    // size change every conversion ran about 5x slower (measured: 30 ms -> 155 ms).
+                    // So a new size gets freshly loaded models.
+                    if (shaped) { SetStatus("Reloading the AI voice…"); models = Reload(models); }
+                    if (manual != null)
+                    {
+                        SetStatus("Applying your delay settings…");
+                        (pipe, worstMs) = Measure(models, rate, manual, bridge, sw);
+                    }
+                    else
+                    {
+                        SetStatus("Finding the shortest delay this PC can keep up with…");
+                        (pipe, worstMs, models) = ChooseBlock(models, rate, bridge, sw);
+                    }
+                    shaped = true;
                     if (pipe == null) continue; // stopping
-                    delay = DelayFor(pipe.BlockFrame, worstMs, rate);
+                    delay = DelayFor(pipe.BlockFrame, worstMs, rate, manual);
                     recent.Clear();
                     pos = -1;
                     late = 0;
-                    ChangeLog.Write($"AI voice: {_voice!.Name} on the {models.Device}, block {pipe.BlockFrame * 1000 / rate} ms, conversion {worstMs:0} ms, delay {delay * 1000 / rate} ms");
+                    ChangeLog.Write($"AI voice: {_voice!.Name} on the {models.Device}, {(manual != null ? "manual" : "automatic")} block {pipe.BlockFrame * 1000 / rate} ms, conversion {worstMs:0} ms, delay {(delay + pipe.BuiltInDelay) * 1000 / rate} ms");
                 }
 
                 // Follow the plugin's timeline; jump ahead if we fell far behind (or it restarted).
@@ -482,22 +512,23 @@ public sealed class RvcEngine : IDisposable
 
                 // Late: the engine already played part of this block. A few in a row: more delay.
                 long playing = bridge.RvcInputWritten - delay;
-                if (playing > pos) { if (++late >= 3) { delay = Math.Min(delay + rate / 20, AudioBridge.RingLen / 2); late = 0; roomSince = 0; ChangeLog.Write($"AI voice: running late, delay now {delay * 1000 / rate} ms"); } }
+                // (Manual settings step up 10 ms at a time instead of 50, to stay as short as possible.)
+                if (playing > pos) { if (++late >= 3) { delay = Math.Min(delay + rate / (manual != null ? 100 : 20), AudioBridge.RingLen / 2); late = 0; roomSince = 0; ChangeLog.Write($"AI voice: running late, delay now {(delay + pipe.BuiltInDelay) * 1000 / rate} ms"); } }
                 else late = Math.Max(0, late - 1);
 
                 // Room to spare for 10 s (the PC got faster, e.g. a game closed): shorten the delay
                 // to what's needed, but only during a pause, so the jump can't be heard.
                 recent.Enqueue(sw.Elapsed.TotalMilliseconds);
                 while (recent.Count > Math.Max(20, 6 * rate / pipe.BlockFrame)) recent.Dequeue();
-                int needed = DelayFor(pipe.BlockFrame, recent.Max(), rate);
-                if (delay > needed + rate * 30 / 1000)
+                int needed = DelayFor(pipe.BlockFrame, recent.Max(), rate, manual);
+                if (delay > needed + rate * (manual != null ? 10 : 30) / 1000)
                 {
                     if (roomSince == 0) roomSince = Environment.TickCount64;
                     else if (Environment.TickCount64 - roomSince > 10_000 && pipe.LastBlockWasPause && late == 0)
                     {
                         delay = needed;
                         roomSince = 0;
-                        ChangeLog.Write($"AI voice: running ahead, delay now {delay * 1000 / rate} ms");
+                        ChangeLog.Write($"AI voice: running ahead, delay now {(delay + pipe.BuiltInDelay) * 1000 / rate} ms");
                     }
                 }
                 else roomSince = 0;
@@ -509,7 +540,7 @@ public sealed class RvcEngine : IDisposable
                     lastStatus = Environment.TickCount64;
                     double ms = sw.Elapsed.TotalMilliseconds, blockMs = pipe.BlockFrame * 1000.0 / rate;
                     string speed = ms > blockMs ? $" This PC is too slow for real time ({ms:0} ms per {blockMs:0} ms of voice)." : "";
-                    SetStatus($"On, using your {models.Device}. Delay {delay * 1000 / rate} ms.{speed}");
+                    SetStatus($"On, using your {models.Device}. Delay {(delay + pipe.BuiltInDelay) * 1000 / rate} ms{(manual != null ? " (your settings)" : "")}.{speed}");
                 }
             }
         }
@@ -533,37 +564,82 @@ public sealed class RvcEngine : IDisposable
     /// is warmed up (a graphics card compiles its work on the first runs), then timed; the first
     /// whose slowest conversion takes at most 60% of the block wins. Returns null when stopping.
     /// </summary>
-    (RvcPipeline? Pipe, double WorstMs) ChooseBlock(RvcModels models, int rate, double extraSec, AudioBridge bridge, Stopwatch sw)
+    (RvcPipeline? Pipe, double WorstMs, RvcModels Models) ChooseBlock(RvcModels models, int rate, AudioBridge bridge, Stopwatch sw)
     {
-        double[] candidates = { 0.12, 0.16, 0.2, 0.25, 0.32, 0.4, 0.5, 0.65 };
-        RvcPipeline? last = null;
-        double lastWorst = 0;
-        foreach (var sec in candidates)
+        double[] candidates = { 0.06, 0.08, 0.1, 0.12, 0.16, 0.2, 0.25, 0.32, 0.4, 0.5, 0.65 };
+        double extraSec = models.Device == "graphics card" ? 1.5 : 0.75;
+        // A conversion takes about as long whatever the block size (the context dominates), so one
+        // timing says which block keeps up. Each other size needs fresh models (see Loop), so sizes
+        // are tried one by one only when the estimate falls short.
+        int i = 0;
+        while (true)
         {
-            if (_stop) return (null, 0);
+            double sec = candidates[i];
             var pipe = new RvcPipeline(models, rate, sec, extraSec) { PitchShift = _voice!.Pitch };
-            var silence = new float[pipe.BlockFrame];
-            double worst = 0;
-            for (int i = 0; i < 7 && !_stop; i++)
-            {
-                bridge.RvcEngineBeat();
-                sw.Restart(); pipe.Process(silence); sw.Stop();
-                if (i >= 3) worst = Math.Max(worst, sw.Elapsed.TotalMilliseconds);
-            }
-            last = pipe; lastWorst = worst;
-            if (worst <= 0.6 * sec * 1000)
+            double worst = Time(pipe, bridge, sw, $"block {sec * 1000:0} ms", out double typical);
+            if (_stop) return (null, 0, models);
+            // Typical conversions well inside the block, and even the slowest inside it: an
+            // occasional slow one is what the delay's margin is for.
+            if (typical <= 0.6 * sec * 1000 && worst <= sec * 1000)
             {
                 ChangeLog.Write($"AI voice: block {sec * 1000:0} ms keeps up (slowest conversion {worst:0} ms)");
-                return (pipe, worst);
+                return (pipe, worst, models);
             }
+            int next = i + 1;
+            while (next < candidates.Length - 1 && (typical * 1.1 > 0.6 * candidates[next] * 1000 || worst > candidates[next] * 1000)) next++;
+            if (next >= candidates.Length)
+            {
+                ChangeLog.Write($"AI voice: this PC is slow for real time even with {sec * 1000:0} ms blocks ({worst:0} ms)");
+                return (pipe, worst, models);
+            }
+            i = next;
+            SetStatus("Finding the shortest delay this PC can keep up with…");
+            models = Reload(models);
         }
-        ChangeLog.Write($"AI voice: this PC is slow for real time even with {candidates[^1] * 1000:0} ms blocks ({lastWorst:0} ms)");
-        return (last, lastWorst);
     }
 
-    /// <summary>Block, plus the time a conversion takes with headroom, plus the engine's own buffer.</summary>
-    static int DelayFor(int block, double worstMs, int rate) =>
-        block + (int)(rate * (worstMs * 1.4 + 40) / 1000);
+    /// <summary>Fresh models (same device and voice), so the graphics card starts over at a new size.</summary>
+    RvcModels Reload(RvcModels models)
+    {
+        models.Dispose();
+        var fresh = new RvcModels(PreferGpu);
+        if (_voice != null) fresh.LoadVoice(_voice);
+        return fresh;
+    }
+
+    /// <summary>Builds the pipeline from manual settings and times it (warm-up first). Null when stopping.</summary>
+    (RvcPipeline? Pipe, double WorstMs) Measure(RvcModels models, int rate, ManualDelay m, AudioBridge bridge, Stopwatch sw)
+    {
+        var pipe = new RvcPipeline(models, rate, m.BlockMs / 1000, m.ContextSec, m.CrossfadeMs / 1000) { PitchShift = _voice!.Pitch };
+        double worst = Time(pipe, bridge, sw, $"block {m.BlockMs:0} ms", out _);
+        return _stop ? (null, 0) : (pipe, worst);
+    }
+
+    /// <summary>Warms the pipeline up, then returns its slowest conversion (ms), the median as typical, and logs the timings.</summary>
+    double Time(RvcPipeline pipe, AudioBridge bridge, Stopwatch sw, string what, out double typical)
+    {
+        var silence = new float[pipe.BlockFrame];
+        var times = new List<double>();
+        for (int i = 0; i < 10 && !_stop; i++)
+        {
+            bridge.RvcEngineBeat();
+            sw.Restart(); pipe.Process(silence); sw.Stop();
+            times.Add(sw.Elapsed.TotalMilliseconds);
+        }
+        // The first runs on a new block size are slow (the graphics card prepares its work); skip them.
+        var steady = times.Skip(4).OrderBy(t => t).ToList();
+        double worst = steady.Count > 0 ? steady[^1] : double.MaxValue;
+        typical = steady.Count > 0 ? steady[steady.Count / 2] : double.MaxValue;
+        ChangeLog.Write($"AI voice: {what} timings {string.Join(" ", times.Select(t => t.ToString("0")))} ms");
+        return worst;
+    }
+
+    /// <summary>
+    /// Block, plus the time a conversion takes, plus a margin for the PC being busy now and then:
+    /// automatic adds 40% and 40 ms; manual adds exactly the safety margin you set.
+    /// </summary>
+    static int DelayFor(int block, double worstMs, int rate, ManualDelay? manual = null) =>
+        block + (int)(rate * (manual != null ? worstMs + manual.SafetyMs : worstMs * 1.4 + 40) / 1000);
 
     public void Dispose() => Stop();
 }

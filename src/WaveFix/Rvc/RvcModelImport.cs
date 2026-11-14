@@ -21,6 +21,12 @@ public sealed class AiVoiceSettings
     public double GateDb { get; set; } = -50;
     /// <summary>Learn the mic's background noise and ignore it (stops babbling in pauses).</summary>
     public bool AutoGate { get; set; } = true;
+    /// <summary>Use the block, context, crossfade and safety below instead of picking automatically.</summary>
+    public bool ManualDelay { get; set; }
+    public double BlockMs { get; set; } = 120;
+    public double ContextSec { get; set; } = 1.0;
+    public double CrossfadeMs { get; set; } = 20;
+    public double SafetyMs { get; set; } = 20;
 
     public AiVoice? Current => Voices.FirstOrDefault(v => v.Id == Selected) ?? Voices.FirstOrDefault();
 }

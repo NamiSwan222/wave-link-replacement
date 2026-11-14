@@ -30,7 +30,7 @@ public partial class MainWindow
         var cancel = new Button { Style = (Style)FindResource("SoftButton"), Height = 40, Padding = new Thickness(18, 0, 18, 0), Margin = new Thickness(0, 0, 10, 0),
             Content = new TextBlock { Text = "Cancel", FontWeight = FontWeights.SemiBold } };
         var main = new Button { Style = (Style)FindResource("PrimaryButton"), Height = 40, Padding = new Thickness(22, 0, 22, 0),
-            Content = new TextBlock { Text = "Start", FontWeight = FontWeights.Bold, Foreground = Brushes.White } };
+            Content = new TextBlock { Text = "Start", FontWeight = FontWeights.Bold, Foreground = (Brush)FindResource("OnPrimary") } };
         buttons.Children.Add(cancel); buttons.Children.Add(main);
         foreach (var c in new UIElement[] { title, say, sentence, meter, progress, results, buttons }) root.Children.Add(c);
         win.Content = root;

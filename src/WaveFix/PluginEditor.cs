@@ -157,7 +157,7 @@ public static class PluginEditor
         root.Children.Add(header);
 
         var done = new Button { Style = (Style)app.FindResource("PrimaryButton"), Height = 40, Padding = new Thickness(22, 0, 22, 0), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
-        done.Content = new TextBlock { Text = "Done", FontWeight = FontWeights.Bold, Foreground = Brushes.White };
+        done.Content = new TextBlock { Text = "Done", FontWeight = FontWeights.Bold, Foreground = (Brush)app.FindResource("OnPrimary") };
         done.Click += (_, _) => win.Close();
         DockPanel.SetDock(done, Dock.Bottom);
         root.Children.Add(done);

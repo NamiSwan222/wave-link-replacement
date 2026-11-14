@@ -28,6 +28,19 @@ public partial class MainWindow : Window
 
     public bool ReallyClose { get; set; }
 
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    /// <summary>Dark title bar in the app's background color (Windows 11; Windows 10 gets plain dark).</summary>
+    public static void DarkTitleBar(Window w)
+    {
+        var h = new System.Windows.Interop.WindowInteropHelper(w).Handle;
+        int on = 1, caption = 0x00141310, text = 0x00F6F1E8; // COLORREF is 0x00BBGGRR: #101314, #E8F1F6
+        DwmSetWindowAttribute(h, 20, ref on, 4);      // DWMWA_USE_IMMERSIVE_DARK_MODE
+        DwmSetWindowAttribute(h, 35, ref caption, 4); // DWMWA_CAPTION_COLOR
+        DwmSetWindowAttribute(h, 36, ref text, 4);    // DWMWA_TEXT_COLOR
+    }
+
     static readonly (string Id, string Label, string Desc)[] Tones =
     {
         (EqPresets.Flat, "Natural", "Your real voice"),
@@ -44,6 +57,7 @@ public partial class MainWindow : Window
         _plugins = new ObservableCollection<PluginEntry>(_settings.Plugins);
         InitializeComponent();
         DataContext = this;
+        SourceInitialized += (_, _) => DarkTitleBar(this);
 
         // Microphone page
         foreach (var t in Tones)

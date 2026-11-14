@@ -20,22 +20,7 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 
 ## New in this version
 
-After updating, click **Set it up for me** once (one Windows permission prompt): the new voice changer and noise removal live in the audio engine.
-
-- **A much bigger voice changer.** A new voice engine changes your pitch while keeping your voice's character, so +5 sounds like a higher voice instead of a sped-up recording, and a new **Formant** control makes your voice bigger or smaller without changing the note. Also new:
-  - **Gender** (pitch and formant together), **Harmonics** (darker or brighter), **Octave layer** (a second voice below or above), **Detune** (metallic, alien) and **Breath** (whispery)
-  - **Auto-tune** that snaps you to the nearest note, and a **Vocoder** that plays your words as a synth chord
-  - **Distortion types** (overdrive, fuzz, megaphone), **Bitcrusher**, **Modulation** (chorus, flanger, phaser), **Radio** (old phone, walkie-talkie with squelch, police radio, AM radio) and **Echo styles** (slapback, canyon, rhythm)
-  - **28 voices** in groups, including Monster, Little kid, Whisper, Android, Synth singer, Walkie-talkie, Retro console, Jet and Canyon. Deep, Giant and Chipmunk now sound like bigger or smaller people instead of slowed-down or sped-up tape.
-- **AI voices, much better:**
-  - **No more babbling in pauses:** WaveFix learns your mic's background noise and keeps pauses silent.
-  - **Shorter delay:** picked automatically for your PC (about 0.2 s on a good graphics card) and adjusted as you go.
-  - **Find voices online:** search RVC voices on Hugging Face and add one with a click, including its index file.
-  - **Advanced settings:** silence threshold, loudness, the voice's index file and strength, and speaker (for models with several voices).
-  - **Voice pictures:** add a picture to any voice.
-- **Hear myself:** hear your mic in your headphones exactly as others hear it, effects and AI voice included (Microphone page).
-- **Set up my mic for me:** stay quiet for a moment, read a sentence, and WaveFix sets your input level, boost, noise removal, rumble filter, leveler and tone. Nothing changes until you click Apply.
-- **Find sounds online** for the soundboard: openly licensed sounds (Freesound, Wikimedia and more), with a preview and the creator's credit kept.
-- **Plugin search is remembered:** **Find plugins on this PC** shows the last search instantly; **Scan again** looks again.
-- **New look:** a calmer plum-dark theme with Inter and IBM Plex Serif fonts, a reorganized sidebar with grouped pages, a quick mute control and live level in the sidebar, and **Setup & help** at the bottom (Start with Windows and Auto-update moved there).
-- **App mixer** shows each app's own icon.
+- **Set the AI voice delay yourself.** AI voices → Advanced → **Set the delay myself**: block size, context, crossfade and a safety margin. **Try the lowest delay** picks the shortest settings that held up in testing (about 0.12 s in all on a graphics card). If your PC can't keep up, WaveFix adds 10 ms at a time on its own.
+- **Much shorter automatic delay.** On a graphics card the AI voice now picks about 0.2 s instead of up to 1.2 s. WaveFix was measuring the graphics card while it was still warming up, and then trying other sizes that ran several times slower until a restart; it now reloads cleanly for each size and judges by the typical conversion.
+- **10 ms less delay for every AI voice:** part of the blend between blocks was reserved but never used.
+- **New look:** Astryx's "Gothic" style: near-black slate backgrounds, light buttons and switches with dark text, the Fustat font, and a dark title bar.

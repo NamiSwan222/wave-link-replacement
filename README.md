@@ -85,7 +85,9 @@ device still uses it). Your settings carry over.
   the real voice, or to silence if "Never send my real voice" is on.
   - Pauses stay silent: an adaptive gate tracks the mic's noise floor and mutes the converted
     output between words (RVC otherwise babbles on noise). The block size and delay are picked
-    automatically from measured conversion time and adjusted while you talk.
+    automatically from measured conversion time and adjusted while you talk, or set by hand
+    (block, context, crossfade, safety margin). DirectML stays fast only for the first input
+    size a session sees, so a new block size reloads the models.
   - Advanced: silence threshold, loudness mix, FAISS index file (`.index`, read by
     `src/WaveFix/Rvc/RvcIndex.cs`, IVF-Flat) and strength, speaker ID; a picture per voice.
   - **Find voices online** searches Hugging Face for RVC models and installs one with its index
@@ -122,9 +124,8 @@ device still uses it). Your settings carry over.
   on/off, mic boost up/down, next voice tone, voice changer on/off, next voice, stop all sounds,
   a key per soundboard sound, open WaveFix, with
   an on-screen confirmation. F-keys and numpad keys can be used on their own
-- Dark UI (palette from TypeUI's "Dark" design skill;
-  [Inter](https://github.com/rsms/inter) and [IBM Plex Serif](https://github.com/IBM/plex), both
-  under the OFL), grouped sidebar with a quick mute and level,
+- Dark UI (colors, shapes and type from the [Astryx](https://www.npmjs.com/package/@astryxdesign/core)
+  "Gothic" theme; [Fustat](https://github.com/Kief-Type-Foundry/Fustat) under the OFL), grouped sidebar with a quick mute and level,
   keyboard focus rings, screen-reader names, per-monitor DPI
 - Tray icon (left click opens, right click for mute and quit), optional start with Windows
 - Warns when Wave Link is running or when the effects aren't attached to the mic correctly

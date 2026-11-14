@@ -37,7 +37,7 @@ public sealed class SetupStepRow : Observable
     public string Message { get => _message; set => Set(ref _message, value); }
 
     public string Glyph => _state switch { "RUN" => "", "DONE" or "SKIP" => "", "FAIL" => "", _ => "" };
-    public string Color => _state switch { "RUN" => "#CDBBDD", "DONE" or "SKIP" => "#22C55E", "FAIL" => "#EF4444", _ => "#6E687A" };
+    public string Color => _state switch { "RUN" => "#D5DFE5", "DONE" or "SKIP" => "#22C55E", "FAIL" => "#EF4444", _ => "#737D86" };
 }
 
 public static class Setup
