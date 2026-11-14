@@ -9,11 +9,13 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyTitle>WaveFix</AssemblyTitle>
     <Product>WaveFix</Product>
-    <Version>0.4.1</Version>
+    <Version>0.5.0</Version>
     <ApplicationIcon>Assets\WaveFix.ico</ApplicationIcon>
     <Company>NamiSwan222</Company>
     <Description>Wave Link replacement: mic effects that stay out of Discord streams</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- VST2 hosting calls plugin function pointers -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- WinForms analyzer: DPI is set in app.manifest on purpose (this is a WPF app) -->
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>

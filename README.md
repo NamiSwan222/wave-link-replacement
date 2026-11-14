@@ -35,8 +35,12 @@ audio APIs.
 - **App mixer:** volume, mute and output device for each app playing sound
 - **Plugins:** add your own 64-bit VST2 effects to the mic chain, or **scan** the usual VST
   folders (and any folder you pick) for them; turn on/off, reorder, remove. They're copied to
-  `C:\ProgramData\WaveFix\Plugins` so the audio engine (LOCAL SERVICE) can load them, and they
-  run on their default settings
+  `C:\ProgramData\WaveFix\Plugins` so the audio engine (LOCAL SERVICE) can load them
+- **Plugin settings:** a Settings button on every plugin (and Adjust on noise removal) opens the
+  plugin's own window, or sliders for plugins without one. Changes apply live: WaveFix hosts the
+  VST2 in a separate process, reads its state (`effGetChunk`, or parameters) and writes it into the
+  chain exactly like Equalizer APO's editor (`ChunkData "…"` or `"name" value` pairs). Reset
+  returns a plugin to its defaults
 - **Shortcuts:** system-wide hotkeys (work in games): mute toggle, push to talk, noise removal
   on/off, mic boost up/down, next voice tone, open WaveFix, with an on-screen confirmation
 - Friendly dark UI (palette and type from the UI/UX Pro Max "podcast / music streaming"
@@ -99,8 +103,6 @@ included. `tools/mic-level.ps1 -Raw` shows the difference.
 
 ## Known limits
 
-- Noise removal runs on the plugin's default settings; Equalizer APO ignored every
-  parameter syntax tried, so gate strength isn't adjustable yet.
 - No compressor yet.
 - Per-app output switching uses the same undocumented Windows API as EarTrumpet. Some apps
   only switch after they restart their audio.

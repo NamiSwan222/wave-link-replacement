@@ -11,7 +11,7 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 - **Microphone:** input level, mic boost, mute, live meter
 - **Sound cleanup:** AI noise removal, rumble filter, voice tones
 - **App mixer:** volume, mute and output device per app
-- **Plugins:** add or scan for your own 64-bit VST2 effects
+- **Plugins:** add or scan for your own 64-bit VST2 effects, and open each one's own settings window (changes apply live)
 - **Shortcuts:** global hotkeys: mute, push to talk, boost, and more
 
 ## First-time setup is automatic

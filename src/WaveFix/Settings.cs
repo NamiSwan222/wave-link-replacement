@@ -3,6 +3,24 @@ using System.Text.Json;
 
 namespace WaveFix;
 
+/// <summary>A short log of important setting changes and why they happened, for troubleshooting.</summary>
+public static class ChangeLog
+{
+    static string Path => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WaveFix", "changes.log");
+
+    public static void Write(string what)
+    {
+        try
+        {
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+            var fi = new FileInfo(Path);
+            if (fi.Exists && fi.Length > 200_000) fi.Delete(); // keep it small
+            File.AppendAllText(Path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  v{Updater.Current}  pid {Environment.ProcessId}  {what}{Environment.NewLine}");
+        }
+        catch { }
+    }
+}
+
 /// <summary>User settings, stored as JSON in %APPDATA%\WaveFix\settings.json.</summary>
 public sealed class AppSettings
 {
@@ -16,6 +34,8 @@ public sealed class AppSettings
     public bool AutoUpdate { get; set; } = true;
     /// <summary>Action id → hotkey text, e.g. "toggle-mute" → "Ctrl+Alt+M".</summary>
     public Dictionary<string, string> Shortcuts { get; set; } = new();
+    /// <summary>Noise removal (RNNoise) settings made in its settings window; null = defaults.</summary>
+    public PluginState? NoiseState { get; set; }
     /// <summary>User VST plugins, in chain order.</summary>
     public List<PluginEntry> Plugins { get; set; } = new();
 

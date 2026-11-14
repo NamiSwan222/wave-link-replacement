@@ -157,11 +157,26 @@ public partial class MainWindow : Window
         EmptyMixer.Visibility = Mixer.Apps.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    void Effect_Changed(object sender, RoutedEventArgs e)
+    // These run only on a real click (Click, not Checked/Unchecked), and each switch only ever
+    // writes its own setting, so nothing that changes a switch in code can overwrite a choice.
+    void NoiseSwitch_Click(object sender, RoutedEventArgs e) => SetNoiseRemoval(NoiseSwitch.IsChecked == true, "switch clicked");
+    void LowCutSwitch_Click(object sender, RoutedEventArgs e) => SetLowCut(LowCutSwitch.IsChecked == true, "switch clicked");
+
+    void SetNoiseRemoval(bool on, string why)
     {
-        if (_loading) return;
-        _settings.NoiseRemoval = NoiseSwitch.IsChecked == true;
-        _settings.LowCut = LowCutSwitch.IsChecked == true;
+        NoiseSwitch.IsChecked = on;
+        if (_settings.NoiseRemoval == on) return;
+        _settings.NoiseRemoval = on;
+        ChangeLog.Write($"Noise removal {(on ? "on" : "off")} ({why})");
+        ApplyEffects();
+    }
+
+    void SetLowCut(bool on, string why)
+    {
+        LowCutSwitch.IsChecked = on;
+        if (_settings.LowCut == on) return;
+        _settings.LowCut = on;
+        ChangeLog.Write($"Rumble filter {(on ? "on" : "off")} ({why})");
         ApplyEffects();
     }
 
@@ -453,6 +468,93 @@ public partial class MainWindow : Window
         UpdateButton.IsEnabled = enabled;
     }
 
+    // ---------- Plugin settings windows ----------
+
+    readonly Dictionary<string, Process> _openEditors = new(StringComparer.OrdinalIgnoreCase);
+
+    void NoiseSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_engine.HasNoisePlugin) { NavSetup.Visibility = Visibility.Visible; NavSetup.IsChecked = true; return; }
+        OpenPluginSettings(_engine.NoisePluginPath, "Noise removal", () => _settings.NoiseState, s => _settings.NoiseState = s);
+    }
+
+    void NoiseReset_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.NoiseState = null;
+        ApplyEffects();
+        Osd.Show(this, "", "Noise removal reset to default");
+    }
+
+    void PluginSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not PluginEntry p) return;
+        OpenPluginSettings(p.Path, p.Name, () => p.State, s => p.State = s);
+    }
+
+    void PluginReset_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not PluginEntry p) return;
+        p.State = null;
+        ApplyEffects();
+        Osd.Show(this, "", $"{p.Name} reset to defaults");
+    }
+
+    /// <summary>
+    /// Opens a plugin's settings window in its own WaveFix process and applies every change to the
+    /// audio engine while it's open (so you can hear it, e.g. in Discord's mic test).
+    /// </summary>
+    void OpenPluginSettings(string dll, string title, Func<PluginState?> get, Action<PluginState?> set)
+    {
+        if (_openEditors.TryGetValue(dll, out var running) && !running.HasExited)
+        {
+            Osd.Show(this, "", $"{title} settings are already open");
+            return;
+        }
+        var stateFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"wavefix-plugin-{Guid.NewGuid():N}.json");
+        System.IO.File.WriteAllText(stateFile, System.Text.Json.JsonSerializer.Serialize(get() ?? new PluginState()));
+        var stamp = System.IO.File.GetLastWriteTimeUtc(stateFile);
+
+        Process? proc;
+        try
+        {
+            var psi = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
+            psi.ArgumentList.Add("--edit-plugin"); psi.ArgumentList.Add(dll); psi.ArgumentList.Add(stateFile); psi.ArgumentList.Add(title);
+            proc = Process.Start(psi);
+        }
+        catch (Exception ex) { ShowPluginError($"Couldn't open the settings: {ex.Message}"); return; }
+        if (proc == null) return;
+        _openEditors[dll] = proc;
+
+        void Pick()
+        {
+            try
+            {
+                var t = System.IO.File.GetLastWriteTimeUtc(stateFile);
+                if (t == stamp) return;
+                stamp = t;
+                var s = System.Text.Json.JsonSerializer.Deserialize<PluginState>(System.IO.File.ReadAllText(stateFile));
+                if (s == null || s.IsEmpty) return;
+                set(s);
+                ApplyEffects(); // Equalizer APO reloads the chain with the new settings
+            }
+            catch { /* file mid-write: next tick */ }
+        }
+
+        var poll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        poll.Tick += (_, _) =>
+        {
+            Pick();
+            if (!proc.HasExited) return;
+            poll.Stop();
+            Pick();
+            _openEditors.Remove(dll);
+            if (proc.ExitCode != 0 && proc.ExitCode != 1)
+                Osd.Show(this, "", $"{title}'s window closed unexpectedly. Your last changes were kept.");
+            try { System.IO.File.Delete(stateFile); } catch { }
+        };
+        poll.Start();
+    }
+
     // ---------- Plugins ----------
 
     void AddPlugin_Click(object sender, RoutedEventArgs e)
@@ -656,8 +758,8 @@ public partial class MainWindow : Window
                 _pttTimer.Start(); // re-mutes when the key is released
                 break;
             case "toggle-noise":
-                NoiseSwitch.IsChecked = NoiseSwitch.IsChecked != true;
-                Osd.Show(this, "", NoiseSwitch.IsChecked == true ? "Noise removal on" : "Noise removal off");
+                SetNoiseRemoval(!_settings.NoiseRemoval, "shortcut");
+                Osd.Show(this, "", _settings.NoiseRemoval ? "Noise removal on" : "Noise removal off");
                 break;
             case "boost-up":
                 BoostSlider.Value = Math.Min(BoostSlider.Maximum, BoostSlider.Value + 3);

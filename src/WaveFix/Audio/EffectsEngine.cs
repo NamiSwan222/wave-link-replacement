@@ -117,10 +117,10 @@ public sealed class EffectsEngine
         var sb = new StringBuilder().AppendLine("# WaveFix mic chain. Changes here are overwritten by the app.");
         // Order: rumble filter, then noise removal on the cleanest signal, then tone, then level.
         if (s.LowCut) sb.AppendLine("Filter: ON HP Fc 80 Hz");
-        if (s.NoiseRemoval && HasNoisePlugin) sb.AppendLine($"VSTPlugin: Library \"{NoisePluginPath}\"");
+        if (s.NoiseRemoval && HasNoisePlugin) sb.AppendLine(PluginState.ConfigLine(NoisePluginPath, s.NoiseState));
         foreach (var line in EqPresets.Lines(s.EqPreset)) sb.AppendLine(line);
         foreach (var p in s.Plugins.Where(p => p.Enabled && File.Exists(p.Path)))
-            sb.AppendLine($"VSTPlugin: Library \"{p.Path}\"");
+            sb.AppendLine(PluginState.ConfigLine(p.Path, p.State));
         if (Math.Abs(s.VoiceBoostDb) > 0.05) sb.AppendLine(FormattableString.Invariant($"Preamp: {s.VoiceBoostDb:0.0} dB"));
         return sb.ToString();
     }

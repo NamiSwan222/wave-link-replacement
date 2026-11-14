@@ -11,6 +11,9 @@ public sealed class PluginEntry : Observable
 
     bool _enabled = true;
     public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }
+
+    /// <summary>Settings made in the plugin's window (null = the plugin's defaults).</summary>
+    public PluginState? State { get; set; }
 }
 
 /// <summary>

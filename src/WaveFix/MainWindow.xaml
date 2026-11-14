@@ -257,15 +257,28 @@
                             <StackPanel>
                                 <TextBlock Text="Sound cleanup" Style="{StaticResource CardTitle}" Margin="0,0,0,16"/>
 
-                                <CheckBox x:Name="NoiseSwitch" Style="{StaticResource Switch}" Checked="Effect_Changed" Unchecked="Effect_Changed"
-                                          AutomationProperties.Name="Noise removal" Margin="0,0,0,18">
+                                <CheckBox x:Name="NoiseSwitch" Style="{StaticResource Switch}" Click="NoiseSwitch_Click"
+                                          AutomationProperties.Name="Noise removal" Margin="0,0,0,8">
                                     <StackPanel>
                                         <TextBlock Text="Noise removal" Style="{StaticResource Label}"/>
                                         <TextBlock Text="Hides keyboard clicks, fans and room noise between your words." Style="{StaticResource Hint}" Margin="0,3,0,0"/>
                                     </StackPanel>
                                 </CheckBox>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+                                    <Button Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Click="NoiseSettings_Click"
+                                            AutomationProperties.Name="Adjust noise removal">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,8,0"/>
+                                            <TextBlock Text="Adjust" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="NoiseResetButton" Style="{StaticResource LinkButton}" Margin="12,0,0,0" VerticalAlignment="Center" Click="NoiseReset_Click"
+                                            AutomationProperties.Name="Reset noise removal to defaults">
+                                        <TextBlock Text="Reset to default" FontSize="12.5" Foreground="{StaticResource SubText}"/>
+                                    </Button>
+                                </StackPanel>
 
-                                <CheckBox x:Name="LowCutSwitch" Style="{StaticResource Switch}" Checked="Effect_Changed" Unchecked="Effect_Changed"
+                                <CheckBox x:Name="LowCutSwitch" Style="{StaticResource Switch}" Click="LowCutSwitch_Click"
                                           AutomationProperties.Name="Low cut" Margin="0,0,0,22">
                                     <StackPanel>
                                         <TextBlock Text="Rumble filter" Style="{StaticResource Label}"/>
@@ -459,6 +472,17 @@
                                         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Click="PluginToggle_Click" Margin="0,0,14,0"
                                                       AutomationProperties.Name="{Binding Name, StringFormat=Turn {0} on or off}"/>
+                                            <Button Style="{StaticResource SoftButton}" Height="40" Padding="12,0" Margin="0,0,6,0" Click="PluginSettings_Click" Tag="{Binding}"
+                                                    ToolTip="Open the plugin's settings window" AutomationProperties.Name="{Binding Name, StringFormat=Settings for {0}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,8,0"/>
+                                                    <TextBlock Text="Settings" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource SoftButton}" Width="40" Height="40" Margin="0,0,6,0" Click="PluginReset_Click" Tag="{Binding}" ToolTip="Reset to the plugin's defaults"
+                                                    AutomationProperties.Name="{Binding Name, StringFormat=Reset {0} to defaults}">
+                                                <TextBlock Text="&#xE777;" Style="{StaticResource Icon}" FontSize="13"/>
+                                            </Button>
                                             <Button Style="{StaticResource SoftButton}" Width="40" Height="40" Click="PluginUp_Click" Tag="{Binding}" ToolTip="Move up"
                                                     AutomationProperties.Name="{Binding Name, StringFormat=Move {0} up}">
                                                 <TextBlock Text="&#xE70E;" Style="{StaticResource Icon}" FontSize="12"/>
