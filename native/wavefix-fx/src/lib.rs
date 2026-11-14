@@ -8,6 +8,7 @@
 pub mod bridge;
 pub mod dsp;
 pub mod params;
+pub mod voice;
 
 use params::{COUNT, PARAMS};
 use std::ffi::c_void;

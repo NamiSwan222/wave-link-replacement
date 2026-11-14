@@ -130,7 +130,7 @@ public partial class MainWindow
 
     void CloseSoundProblems_Click(object sender, RoutedEventArgs e) => SoundAddProblems.Visibility = Visibility.Collapsed;
 
-    async Task AddSounds(string[] files)
+    async Task AddSounds(string[] files, string? credit = null)
     {
         AddSoundsButton.IsEnabled = false;
         SoundAddProblems.Visibility = Visibility.Collapsed;
@@ -145,7 +145,7 @@ public partial class MainWindow
                 {
                     // Check it decodes (and isn't too long) before adding it.
                     await Task.Run(() => SoundboardEngine.Check(file));
-                    var entry = new SoundEntry { Name = name };
+                    var entry = new SoundEntry { Name = name, Credit = credit };
                     var dest = Path.Combine(SoundboardSettings.Folder, entry.Id + Path.GetExtension(file));
                     File.Copy(file, dest, overwrite: true);
                     _soundboard.Forget(file);

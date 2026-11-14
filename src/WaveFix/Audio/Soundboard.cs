@@ -525,6 +525,9 @@ public sealed class SoundEntry : Observable
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..10];
     public string Name { get; set; } = "";
+    /// <summary>Where a sound from "Find sounds online" came from (title, creator, license).</summary>
+    public string? Credit { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string Tip => Credit == null ? "Play" : $"Play · {Credit}";
     /// <summary>Copy of the file in %APPDATA%\WaveFix\Sounds.</summary>
     public string File { get; set; } = "";
     public double Volume { get; set; } = 100;

@@ -58,7 +58,23 @@ pub const LIM_CEILING: usize = 28;
 pub const SB_ON: usize = 29;
 pub const RVC_ON: usize = 30;
 pub const RVC_MUTE: usize = 31;
-pub const COUNT: usize = 32;
+// Voice engine (spectral): see voice.rs.
+pub const FORMANT: usize = 32;
+pub const HARMONICS: usize = 33;
+pub const OCTAVE: usize = 34;
+pub const DETUNE: usize = 35;
+pub const BREATH: usize = 36;
+pub const TUNE: usize = 37;
+pub const VOCODER: usize = 38;
+// Sample-by-sample effects.
+pub const CRUSH: usize = 39;
+pub const MOD_TYPE: usize = 40;
+pub const MOD_MIX: usize = 41;
+pub const MOD_RATE: usize = 42;
+pub const DRIVE_TYPE: usize = 43;
+pub const ECHO_STYLE: usize = 44;
+pub const RADIO: usize = 45;
+pub const COUNT: usize = 46;
 
 /// Names stay at 15 characters or fewer and without spaces (hosts give small name buffers).
 pub static PARAMS: [Param; COUNT] = [
@@ -97,6 +113,29 @@ pub static PARAMS: [Param; COUNT] = [
     toggle("RvcOn"),
     // When the AI voice isn't available: silence (on) or the real voice (off).
     toggle("RvcMute"),
+    // Voice size, independent of pitch: below 0 bigger/deeper, above 0 smaller.
+    lin("Formant", -12.0, 12.0, 0.0, "st"),
+    // Darker (-1) .. brighter (+1) harmonics.
+    lin("Harmonics", -1.0, 1.0, 0.0, ""),
+    // An extra voice an octave below (<0) or above (>0), this loud.
+    lin("Octave", -1.0, 1.0, 0.0, ""),
+    lin("Detune", 0.0, 1.0, 0.0, "%"),
+    lin("Breath", 0.0, 1.0, 0.0, "%"),
+    // Auto-tune strength (snap to the nearest note).
+    lin("Tune", 0.0, 1.0, 0.0, "%"),
+    lin("Vocoder", 0.0, 1.0, 0.0, "%"),
+    // Bitcrusher: fewer bits and a lower sample rate.
+    lin("Crush", 0.0, 1.0, 0.0, "%"),
+    // 0 off, 1 chorus, 2 flanger, 3 phaser.
+    lin("ModType", 0.0, 3.0, 0.0, ""),
+    lin("ModMix", 0.0, 1.0, 0.0, "%"),
+    lin("ModRate", 0.05, 8.0, 0.5, "Hz"),
+    // 0 overdrive, 1 fuzz, 2 megaphone.
+    lin("DriveType", 0.0, 2.0, 0.0, ""),
+    // 0 echo, 1 slapback, 2 canyon, 3 rhythm (three taps).
+    lin("EchoStyle", 0.0, 3.0, 0.0, ""),
+    // 0 off, 1 old phone, 2 walkie-talkie, 3 police radio, 4 AM radio.
+    lin("Radio", 0.0, 4.0, 0.0, ""),
 ];
 
 impl Param {

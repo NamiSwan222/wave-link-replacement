@@ -50,13 +50,29 @@ public sealed class RvcModels : IDisposable
         return o;
     }
 
+    /// <summary>The voice's feature index, when it has one.</summary>
+    public RvcIndex? Index { get; private set; }
+    string? _indexPath;
+
     public void LoadVoice(AiVoice v)
     {
-        if (VoiceInfo?.File == v.File && Voice != null) { VoiceInfo = v; return; }
-        var s = new InferenceSession(v.File, Options(_gpu));
-        Voice?.Dispose();
-        Voice = s;
+        if (!(VoiceInfo?.File == v.File && Voice != null))
+        {
+            var s = new InferenceSession(v.File, Options(_gpu));
+            Voice?.Dispose();
+            Voice = s;
+        }
         VoiceInfo = v;
+        if (v.IndexFile != _indexPath)
+        {
+            _indexPath = v.IndexFile;
+            Index = null;
+            if (v.IndexFile != null && System.IO.File.Exists(v.IndexFile))
+            {
+                try { Index = RvcIndex.Load(v.IndexFile); }
+                catch (Exception ex) { ChangeLog.Write($"AI voice: index {v.IndexFile} not used: {ex.Message}"); }
+            }
+        }
     }
 
     public void Dispose() { ContentVec.Dispose(); Rmvpe.Dispose(); Voice?.Dispose(); }
@@ -74,6 +90,18 @@ public sealed class RvcPipeline
     public int BlockFrame { get; }
     readonly int _solaBuf, _solaSearch, _extra, _total, _total16, _block16;
     readonly float[] _inputWav, _input16;
+    /// <summary>Speech (1) or pause (0) for each sample of _inputWav, smoothed.</summary>
+    readonly float[] _maskWav;
+    double _floorDb = -60;
+    bool _floorKnown;
+    int _holdFrames;
+    float _env;
+    /// <summary>Learn the mic's background-noise level and treat anything not clearly above it as silence.</summary>
+    public bool AutoGate { get; set; } = true;
+    /// <summary>True when the newest block was silence (a safe moment to change the delay).</summary>
+    public bool LastBlockWasPause { get; private set; }
+    /// <summary>The threshold in use right now (dBFS), for the app to show.</summary>
+    public double ThresholdDb { get; private set; } = -50;
     readonly Resampler _to16;
     readonly MelSpectrogram _mel = new();
     readonly long[] _cachePitch = new long[1024];
@@ -102,6 +130,7 @@ public sealed class RvcPipeline
         _total16 = 160 * _total / _zc;
         _block16 = 160 * BlockFrame / _zc;
         _inputWav = new float[_total];
+        _maskWav = new float[_total];
         _input16 = new float[_total16];
         _to16 = new Resampler(_sr, 16000);
         _solaBuffer = new float[_solaBuf];
@@ -120,9 +149,11 @@ public sealed class RvcPipeline
     {
         var voice = _m.VoiceInfo ?? throw new InvalidOperationException("No AI voice loaded");
         var block = blockIn.ToArray();
-        Gate(block);
+        var mask = Gate(block);
+        LastBlockWasPause = mask.Length == 0 || mask.Max() < 0.01f;
 
         Shift(_inputWav, block);
+        Shift(_maskWav, mask);
         Shift(_input16, _to16.Process(block));
 
         // ---- What's being said (ContentVec), 50 frames a second ----
@@ -134,6 +165,14 @@ public sealed class RvcPipeline
             var t = (DenseTensor<float>)r.First(x => x.Name == (v2 ? "v2" : "v1")).AsTensor<float>();
             frames = t.Dimensions[1];
             feats = t.Buffer.ToArray();
+        }
+        // Index: pull the newest frames toward the voice's own training features (as RVC does from
+        // skip_head/2 on, in these 50-per-second frames).
+        if (_m.Index is { } index && index.Dim == dim && voice.IndexRate > 0.001)
+        {
+            float rate = (float)Math.Clamp(voice.IndexRate, 0, 1);
+            for (int fr = Math.Max(0, _extra / _zc / 2); fr < frames; fr++)
+                index.Blend(feats.AsSpan(fr * dim, dim), rate);
         }
 
         // ---- Your pitch (RMVPE) for the newest part, kept in a rolling cache ----
@@ -184,7 +223,7 @@ public sealed class RvcPipeline
             NamedOnnxValue.CreateFromTensor("phone_lengths", new DenseTensor<long>(new long[] { pLen }, new[] { 1 })),
             NamedOnnxValue.CreateFromTensor("pitch", new DenseTensor<long>(pitch, new[] { 1, pLen })),
             NamedOnnxValue.CreateFromTensor("pitchf", new DenseTensor<float>(pitchf, new[] { 1, pLen })),
-            NamedOnnxValue.CreateFromTensor("sid", new DenseTensor<long>(new long[] { 0 }, new[] { 1 })),
+            NamedOnnxValue.CreateFromTensor("sid", new DenseTensor<long>(new long[] { Math.Clamp(voice.SpeakerId, 0, Math.Max(0, voice.Speakers - 1)) }, new[] { 1 })),
             NamedOnnxValue.CreateFromTensor("rnd", new DenseTensor<float>(rnd, new[] { 1, 192, pLen })),
             NamedOnnxValue.CreateFromTensor("skip_head", new DenseTensor<long>(new long[] { skipHead }, new[] { 1 })),
             NamedOnnxValue.CreateFromTensor("return_length", new DenseTensor<long>(new long[] { returnLength }, new[] { 1 })),
@@ -200,7 +239,14 @@ public sealed class RvcPipeline
         }
         else if (audio.Length != outLen) Array.Resize(ref audio, outLen);
 
-        MatchLoudness(audio, _inputWav.AsSpan(_extra, Math.Min(outLen, _total - _extra)));
+        MatchLoudness(audio, _inputWav.AsSpan(_extra, Math.Min(outLen, _total - _extra)), Math.Clamp(voice.LoudnessMix, 0, 1));
+        // Clean pauses: whatever the model makes of background noise between your words (the
+        // "babbling") is faded out, using the same speech/pause decision as the input.
+        for (int i = 0; i < audio.Length; i++)
+        {
+            int at = _extra + i;
+            audio[i] *= at < _total ? _maskWav[at] : _maskWav[^1];
+        }
         // Soft ceiling: the model can overshoot a little on loud syllables.
         for (int i = 0; i < audio.Length; i++)
         {
@@ -223,27 +269,43 @@ public sealed class RvcPipeline
         add.CopyTo(buf.AsSpan(buf.Length - add.Length));
     }
 
-    /// <summary>Silences 10 ms frames below the gate (and not next to a louder one).</summary>
-    void Gate(float[] block)
+    /// <summary>
+    /// Decides speech or pause for each 10 ms of the block and silences the pauses (the model turns
+    /// any background noise into babble). With AutoGate the threshold follows the mic's own
+    /// background noise: its level is tracked as a floor that drops quickly and rises slowly (about
+    /// 1 dB a second, so talking doesn't push it up), and speech must be 9 dB above it. The gate
+    /// holds 200 ms after speech (word endings) and fades in 5 ms, out 60 ms. Returns the mask.
+    /// </summary>
+    float[] Gate(float[] block)
     {
         int frames = block.Length / _zc;
-        var loud = new bool[frames];
-        double thr = Math.Pow(10, GateDb / 20);
+        var mask = new float[block.Length];
+        float attack = 1f / Math.Max(1, (int)(0.005 * _sr)), release = 1f / Math.Max(1, (int)(0.06 * _sr));
         for (int f = 0; f < frames; f++)
         {
             double s = 0;
             for (int i = f * _zc; i < (f + 1) * _zc; i++) s += block[i] * block[i];
-            loud[f] = Math.Sqrt(s / _zc) >= thr;
+            double db = 10 * Math.Log10(s / _zc + 1e-12);
+            if (!_floorKnown) { _floorDb = db; _floorKnown = true; }
+            else if (db < _floorDb) _floorDb += (db - _floorDb) * 0.3;
+            else _floorDb += Math.Min(db - _floorDb, 0.01);
+            double thr = AutoGate ? Math.Max(GateDb, _floorDb + 9) : GateDb;
+            ThresholdDb = Math.Min(thr, -15);
+            if (db >= ThresholdDb) _holdFrames = 20;
+            else if (_holdFrames > 0) _holdFrames--;
+            float target = _holdFrames > 0 ? 1f : 0f;
+            for (int i = f * _zc; i < (f + 1) * _zc; i++)
+            {
+                _env = _env < target ? Math.Min(target, _env + attack) : Math.Max(target, _env - release);
+                mask[i] = _env;
+                block[i] *= _env;
+            }
         }
-        for (int f = 0; f < frames; f++)
-        {
-            bool keep = loud[f] || (f > 0 && loud[f - 1]) || (f + 1 < frames && loud[f + 1]);
-            if (!keep) Array.Clear(block, f * _zc, _zc);
-        }
+        return mask;
     }
 
     /// <summary>Gives the AI voice the loudness envelope of your real voice (RVC's volume mix at 0).</summary>
-    void MatchLoudness(float[] audio, ReadOnlySpan<float> input)
+    void MatchLoudness(float[] audio, ReadOnlySpan<float> input, double mix)
     {
         int frames = audio.Length / _zc;
         if (frames == 0) return;
@@ -254,7 +316,8 @@ public sealed class RvcPipeline
             double si = 0, so = 0;
             for (int i = a; i < b; i++) { so += audio[i] * audio[i]; if (i < input.Length) si += input[i] * input[i]; }
             double ri = Math.Sqrt(si / (b - a)), ro = Math.Max(Math.Sqrt(so / (b - a)), 1e-3);
-            gain[f] = (float)Math.Min(ri / ro, 8);
+            // mix 0: your loudness; 1: the model's own (RVC's "volume envelope" setting).
+            gain[f] = (float)Math.Min(Math.Pow(ri / ro, 1 - mix), 8);
         }
         for (int i = 0; i < audio.Length; i++)
         {
@@ -302,6 +365,9 @@ public sealed class RvcEngine : IDisposable
 
     public bool PreferGpu { get; set; } = true;
     public double BlockSeconds { get; set; } = 0.25;
+    /// <summary>Noise gate for the voice sent to the model (dBFS); applied from the next block.</summary>
+    public volatile float GateDb = -50;
+    public volatile bool AutoGate = true;
 
     /// <summary>True while the app wants the engine to send your voice to it (the AI voice is on).</summary>
     public static volatile bool Active;
@@ -359,6 +425,8 @@ public sealed class RvcEngine : IDisposable
             int delay = 0;
             double worstMs = 0;
             int late = 0;
+            var recent = new Queue<double>(); // the last few seconds of conversion times (ms)
+            long roomSince = 0;
             var sw = new Stopwatch();
             long lastStatus = 0;
             while (!_stop)
@@ -371,6 +439,7 @@ public sealed class RvcEngine : IDisposable
                     if (models.VoiceInfo?.File != v.File) { SetStatus($"Loading {v.Name}…"); models.LoadVoice(v); pipe = null; }
                     else models.LoadVoice(v);
                     if (pipe != null) pipe.PitchShift = v.Pitch;
+                    if (models.Index != null) ChangeLog.Write($"AI voice: using {v.Name}'s index ({models.Index.Count} features)");
                 }
                 int pr = bridge.PluginRate;
                 long written = bridge.RvcInputWritten;
@@ -383,21 +452,12 @@ public sealed class RvcEngine : IDisposable
                 if (pipe == null || pr != rate)
                 {
                     rate = pr;
-                    SetStatus("Warming up…");
+                    SetStatus("Finding the shortest delay this PC can keep up with…");
                     bool gpu = models.Device == "graphics card";
-                    // The processor is 3-4x slower than a graphics card: bigger blocks keep up.
-                    pipe = new RvcPipeline(models, rate, gpu ? BlockSeconds : Math.Max(BlockSeconds, 0.4), gpu ? 1.5 : 0.75) { PitchShift = _voice!.Pitch };
-                    // Time a few conversions to choose a delay this PC can keep up with.
-                    var silence = new float[pipe.BlockFrame];
-                    worstMs = 0;
-                    // The first runs are slow (the graphics card compiles its work); time the later ones.
-                    for (int i = 0; i < 8 && !_stop; i++)
-                    {
-                        bridge.RvcEngineBeat();
-                        sw.Restart(); pipe.Process(silence); sw.Stop();
-                        if (i >= 4) worstMs = Math.Max(worstMs, sw.Elapsed.TotalMilliseconds);
-                    }
+                    (pipe, worstMs) = ChooseBlock(models, rate, gpu ? 1.5 : 0.75, bridge, sw);
+                    if (pipe == null) continue; // stopping
                     delay = DelayFor(pipe.BlockFrame, worstMs, rate);
+                    recent.Clear();
                     pos = -1;
                     late = 0;
                     ChangeLog.Write($"AI voice: {_voice!.Name} on the {models.Device}, block {pipe.BlockFrame * 1000 / rate} ms, conversion {worstMs:0} ms, delay {delay * 1000 / rate} ms");
@@ -410,6 +470,8 @@ public sealed class RvcEngine : IDisposable
 
                 var block = new float[pipe.BlockFrame];
                 bridge.ReadRvcInput(pos, block);
+                pipe.GateDb = GateDb;
+                pipe.AutoGate = AutoGate;
                 sw.Restart();
                 var outBlock = pipe.Process(block);
                 sw.Stop();
@@ -420,8 +482,25 @@ public sealed class RvcEngine : IDisposable
 
                 // Late: the engine already played part of this block. A few in a row: more delay.
                 long playing = bridge.RvcInputWritten - delay;
-                if (playing > pos) { if (++late >= 3) { delay = Math.Min(delay + rate / 20, AudioBridge.RingLen / 2); late = 0; ChangeLog.Write($"AI voice: running late, delay now {delay * 1000 / rate} ms"); } }
+                if (playing > pos) { if (++late >= 3) { delay = Math.Min(delay + rate / 20, AudioBridge.RingLen / 2); late = 0; roomSince = 0; ChangeLog.Write($"AI voice: running late, delay now {delay * 1000 / rate} ms"); } }
                 else late = Math.Max(0, late - 1);
+
+                // Room to spare for 10 s (the PC got faster, e.g. a game closed): shorten the delay
+                // to what's needed, but only during a pause, so the jump can't be heard.
+                recent.Enqueue(sw.Elapsed.TotalMilliseconds);
+                while (recent.Count > Math.Max(20, 6 * rate / pipe.BlockFrame)) recent.Dequeue();
+                int needed = DelayFor(pipe.BlockFrame, recent.Max(), rate);
+                if (delay > needed + rate * 30 / 1000)
+                {
+                    if (roomSince == 0) roomSince = Environment.TickCount64;
+                    else if (Environment.TickCount64 - roomSince > 10_000 && pipe.LastBlockWasPause && late == 0)
+                    {
+                        delay = needed;
+                        roomSince = 0;
+                        ChangeLog.Write($"AI voice: running ahead, delay now {delay * 1000 / rate} ms");
+                    }
+                }
+                else roomSince = 0;
                 pos += pipe.BlockFrame;
 
                 Running = true;
@@ -447,6 +526,39 @@ public sealed class RvcEngine : IDisposable
             models?.Dispose();
             bridge?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Picks the shortest block (so the shortest delay) this PC converts comfortably: each candidate
+    /// is warmed up (a graphics card compiles its work on the first runs), then timed; the first
+    /// whose slowest conversion takes at most 60% of the block wins. Returns null when stopping.
+    /// </summary>
+    (RvcPipeline? Pipe, double WorstMs) ChooseBlock(RvcModels models, int rate, double extraSec, AudioBridge bridge, Stopwatch sw)
+    {
+        double[] candidates = { 0.12, 0.16, 0.2, 0.25, 0.32, 0.4, 0.5, 0.65 };
+        RvcPipeline? last = null;
+        double lastWorst = 0;
+        foreach (var sec in candidates)
+        {
+            if (_stop) return (null, 0);
+            var pipe = new RvcPipeline(models, rate, sec, extraSec) { PitchShift = _voice!.Pitch };
+            var silence = new float[pipe.BlockFrame];
+            double worst = 0;
+            for (int i = 0; i < 7 && !_stop; i++)
+            {
+                bridge.RvcEngineBeat();
+                sw.Restart(); pipe.Process(silence); sw.Stop();
+                if (i >= 3) worst = Math.Max(worst, sw.Elapsed.TotalMilliseconds);
+            }
+            last = pipe; lastWorst = worst;
+            if (worst <= 0.6 * sec * 1000)
+            {
+                ChangeLog.Write($"AI voice: block {sec * 1000:0} ms keeps up (slowest conversion {worst:0} ms)");
+                return (pipe, worst);
+            }
+        }
+        ChangeLog.Write($"AI voice: this PC is slow for real time even with {candidates[^1] * 1000:0} ms blocks ({lastWorst:0} ms)");
+        return (last, lastWorst);
     }
 
     /// <summary>Block, plus the time a conversion takes with headroom, plus the engine's own buffer.</summary>

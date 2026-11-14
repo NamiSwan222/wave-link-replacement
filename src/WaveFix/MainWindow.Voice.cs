@@ -73,29 +73,76 @@ public partial class MainWindow
 
         // ---- Voice changer ----
         var v = _settings.Voice;
-        foreach (var preset in VoicePreset.All.Append(new VoicePreset(VoicePreset.CustomId, "Custom", "Your own mix")))
+        var custom = new VoicePreset(VoicePreset.CustomId, "Custom", "Your own mix");
+        foreach (var (category, ids) in VoiceCategories)
         {
-            var rb = new RadioButton
+            var wrap = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
+            VoicePresetPanel.Children.Add(new TextBlock { Text = category, Style = (Style)FindResource("NavGroup"), Margin = new Thickness(2, 0, 0, 8) });
+            VoicePresetPanel.Children.Add(wrap);
+            foreach (var id in ids)
             {
-                Content = preset.Label, Tag = preset.Desc, GroupName = "voice", Style = (Style)FindResource("ToneChoice"),
-                IsChecked = preset.Id == v.Preset, IsEnabled = fx, DataContext = preset,
-            };
-            AutomationProperties.SetName(rb, $"Voice {preset.Label}");
-            rb.Checked += (_, _) =>
-            {
-                if (_loading || _syncing) return;
-                SelectVoice(preset, "voice picked");
-            };
-            VoicePresetPanel.Children.Add(rb);
+                var preset = id == VoicePreset.CustomId ? custom : VoicePreset.Find(id);
+                if (preset == null) continue;
+                var rb = new RadioButton
+                {
+                    Content = preset.Label, Tag = preset.Desc, GroupName = "voice", Style = (Style)FindResource("ToneChoice"),
+                    IsChecked = preset.Id == v.Preset, IsEnabled = fx, DataContext = preset,
+                };
+                AutomationProperties.SetName(rb, $"Voice {preset.Label}");
+                rb.Checked += (_, _) =>
+                {
+                    if (_loading || _syncing) return;
+                    SelectVoice(preset, "voice picked");
+                };
+                wrap.Children.Add(rb);
+            }
         }
 
-        AddVoiceSlider(0, 0, "Pitch", "Lower or higher, in semitones", -12, 12, 0.5, s => s.Pitch, (s, x) => s.Pitch = x,
+        int vRow = 0, vCol = 0;
+        void Next() { if (vCol == 0) vCol = 2; else { vCol = 0; vRow++; } }
+        void Header(string text) { if (vCol != 0) { vRow++; vCol = 0; } AddVoiceHeader(vRow++, text); }
+        void Slide(string label, string hint, double min, double max, double step, Func<VoiceSettings, double> get, Action<VoiceSettings, double> set,
+            Func<double, string> format, bool resync = false)
+        { AddVoiceSlider(vRow, vCol, label, hint, min, max, step, get, set, format, resync); Next(); }
+        void Pick(string label, string hint, string[] options, Func<VoiceSettings, int> get, Action<VoiceSettings, int> set)
+        { AddVoiceChoice(vRow, vCol, label, hint, options, get, set); Next(); }
+        static string Signed(double x, string neg, string pos) => Math.Abs(x) < 0.5 ? "Normal" : x < 0 ? $"{neg} {-x:0}%" : $"{pos} {x:0}%";
+
+        Header("Voice shape");
+        // Gender moves pitch and formant together (and shows where they are).
+        Slide("Gender", "Deeper and bigger, or lighter and smaller", -100, 100, 5,
+            s => Math.Clamp(s.Formant / 0.04, -100, 100), (s, x) => { s.Pitch = Math.Round(x * 0.06 * 2) / 2; s.Formant = Math.Round(x * 0.04 * 2) / 2; },
+            x => Signed(x, "Deeper", "Lighter"), resync: true);
+        Slide("Pitch", "Your note, in semitones (keeps your voice)", -12, 12, 0.5, s => s.Pitch, (s, x) => s.Pitch = x,
             x => x == 0 ? "Normal" : $"{x:+0.#;-0.#} st");
-        AddVoiceSlider(0, 2, "Robot", "Metallic, buzzy tone", 0, 100, 1, s => s.Robot, (s, x) => s.Robot = x, Percent);
-        AddVoiceSlider(1, 0, "Wobble", "Wavy, unsteady pitch", 0, 100, 1, s => s.Wobble, (s, x) => s.Wobble = x, Percent);
-        AddVoiceSlider(1, 2, "Grit", "Crunchy distortion", 0, 100, 1, s => s.Grit, (s, x) => s.Grit = x, Percent);
-        AddVoiceSlider(2, 0, "Echo", "Repeats after you talk", 0, 100, 1, s => s.Echo, (s, x) => s.Echo = x, Percent);
-        AddVoiceSlider(2, 2, "Room", "Reverb, like a big hall", 0, 100, 1, s => s.Room, (s, x) => s.Room = x, Percent);
+        Slide("Formant", "Voice size without changing the note", -12, 12, 0.5, s => s.Formant, (s, x) => s.Formant = x,
+            x => x == 0 ? "Normal" : x < 0 ? $"Bigger {-x:0.#}" : $"Smaller {x:0.#}");
+        Slide("Harmonics", "Darker or brighter, buzzier tone", -100, 100, 5, s => s.Harmonics, (s, x) => s.Harmonics = x,
+            x => Signed(x, "Darker", "Brighter"));
+        Slide("Octave layer", "A second voice an octave below or above", -100, 100, 5, s => s.Octave, (s, x) => s.Octave = x,
+            x => Signed(x, "Below", "Above"));
+        Slide("Detune", "Pulls overtones off-key: metallic, alien", 0, 100, 1, s => s.Detune, (s, x) => s.Detune = x, Percent);
+        Slide("Breath", "Airy, whispery noise", 0, 100, 1, s => s.Breath, (s, x) => s.Breath = x, Percent);
+
+        Header("Pitch effects");
+        Slide("Auto-tune", "Snaps you to the nearest note (100% = robotic)", 0, 100, 1, s => s.Tune, (s, x) => s.Tune = x, Percent);
+        Slide("Vocoder", "Your words played by a synth chord", 0, 100, 1, s => s.Vocoder, (s, x) => s.Vocoder = x, Percent);
+
+        Header("Effects");
+        Slide("Ring mod", "Metallic, robotic buzz", 0, 100, 1, s => s.Robot, (s, x) => s.Robot = x, Percent);
+        Slide("Ring tone", "Low = growly robot, high = bell-like", 20, 400, 5, s => s.RobotFreq, (s, x) => s.RobotFreq = x, x => $"{x:0} Hz");
+        Slide("Distortion", "Crunch and grit", 0, 100, 1, s => s.Grit, (s, x) => s.Grit = x, Percent);
+        Pick("Distortion type", "Kind of crunch", new[] { "Overdrive", "Fuzz", "Megaphone" }, s => s.DriveType, (s, i) => s.DriveType = i);
+        Slide("Bitcrusher", "Retro, 8-bit sound", 0, 100, 1, s => s.Crush, (s, x) => s.Crush = x, Percent);
+        Slide("Wobble", "Wavy, unsteady pitch", 0, 100, 1, s => s.Wobble, (s, x) => s.Wobble = x, Percent);
+        Pick("Modulation", "Chorus, flanger or phaser", new[] { "Off", "Chorus", "Flanger", "Phaser" }, s => s.ModType, (s, i) => s.ModType = i);
+        Slide("Modulation amount", "How strong the swirl is", 0, 100, 1, s => s.ModMix, (s, x) => s.ModMix = x, Percent);
+        Slide("Modulation speed", "How fast it sweeps", 0.05, 8, 0.05, s => s.ModRate, (s, x) => s.ModRate = x, x => $"{x:0.##} Hz");
+        Pick("Radio", "Phone and radio sounds", new[] { "Off", "Old phone", "Walkie-talkie", "Police radio", "AM radio" }, s => s.Radio, (s, i) => s.Radio = i);
+        Slide("Echo", "Repeats after you talk", 0, 100, 1, s => s.Echo, (s, x) => s.Echo = x, Percent);
+        Pick("Echo style", "How it repeats", new[] { "Echo", "Slapback", "Canyon", "Rhythm" }, s => s.EchoStyle, (s, i) => s.EchoStyle = i);
+        Slide("Echo time", "Gap between repeats", 20, 1000, 10, s => s.EchoTime, (s, x) => s.EchoTime = x, x => $"{x:0} ms");
+        Slide("Room", "Reverb, like a big hall", 0, 100, 1, s => s.Room, (s, x) => s.Room = x, Percent);
 
         VoiceSwitch.IsChecked = v.Enabled;
         VoiceSwitch.IsEnabled = fx;
@@ -104,8 +151,56 @@ public partial class MainWindow
 
     static string Percent(double x) => x < 0.5 ? "Off" : $"{x:0}%";
 
+    /// <summary>Preset groups on the page (Custom last).</summary>
+    static readonly (string Category, string[] Ids)[] VoiceCategories =
+    {
+        ("Size and age", new[] { "deep", "giant", "swap-down", "swap-up", "kid", "chipmunk" }),
+        ("Characters", new[] { "monster", "whisper", "ghost", "alien", "bell", "twins" }),
+        ("Robots and music", new[] { "robot", "android", "autotune", "synth", "retro" }),
+        ("Radio and phone", new[] { "phone", "walkie", "police", "amradio", "megaphone" }),
+        ("Spaces and effects", new[] { "cave", "canyon", "underwater", "jet", "dream", "space", VoicePreset.CustomId }),
+    };
+
+    readonly List<(ComboBox Box, Func<VoiceSettings, int> Get)> _voiceChoices = new();
+
+    void AddVoiceHeader(int row, string text)
+    {
+        while (VoiceSliders.RowDefinitions.Count <= row) VoiceSliders.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var t = new TextBlock { Text = text, Style = (Style)FindResource("CardTitle"), FontSize = 14.5, Margin = new Thickness(0, row == 0 ? 0 : 8, 0, 12) };
+        Grid.SetRow(t, row);
+        Grid.SetColumnSpan(t, 3);
+        VoiceSliders.Children.Add(t);
+    }
+
+    void AddVoiceChoice(int row, int col, string label, string hint, string[] options, Func<VoiceSettings, int> get, Action<VoiceSettings, int> set)
+    {
+        while (VoiceSliders.RowDefinitions.Count <= row) VoiceSliders.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+        panel.Children.Add(new TextBlock { Text = label, Style = (Style)FindResource("Label") });
+        panel.Children.Add(new TextBlock { Text = hint, Style = (Style)FindResource("Hint"), Margin = new Thickness(0, 2, 0, 6) });
+        var box = new ComboBox { ItemsSource = options, SelectedIndex = Math.Clamp(get(_settings.Voice), 0, options.Length - 1), IsEnabled = VoiceFx.Available };
+        AutomationProperties.SetName(box, $"Voice {label}");
+        box.SelectionChanged += (_, _) =>
+        {
+            if (_loading || _syncing || box.SelectedIndex < 0) return;
+            set(_settings.Voice, box.SelectedIndex);
+            if (_settings.Voice.Preset != VoicePreset.CustomId)
+            {
+                _settings.Voice.Preset = VoicePreset.CustomId;
+                CheckVoiceButton(VoicePreset.CustomId);
+            }
+            UpdateVoiceText();
+            ApplySoon();
+        };
+        panel.Children.Add(box);
+        Grid.SetRow(panel, row);
+        Grid.SetColumn(panel, col);
+        VoiceSliders.Children.Add(panel);
+        _voiceChoices.Add((box, get));
+    }
+
     void AddVoiceSlider(int row, int col, string label, string hint, double min, double max, double step,
-        Func<VoiceSettings, double> get, Action<VoiceSettings, double> set, Func<double, string> format)
+        Func<VoiceSettings, double> get, Action<VoiceSettings, double> set, Func<double, string> format, bool resync = false)
     {
         while (VoiceSliders.RowDefinitions.Count <= row) VoiceSliders.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
@@ -128,6 +223,7 @@ public partial class MainWindow
             value.Text = format(slider.Value);
             if (_loading || _syncing) return;
             set(_settings.Voice, slider.Value);
+            if (resync) SyncVoiceSliders(); // e.g. Gender moved Pitch and Formant
             if (_settings.Voice.Preset != VoicePreset.CustomId)
             {
                 _settings.Voice.Preset = VoicePreset.CustomId;
@@ -163,7 +259,7 @@ public partial class MainWindow
         _syncing = true;
         try
         {
-            foreach (var rb in VoicePresetPanel.Children.OfType<RadioButton>())
+            foreach (var rb in VoicePresetPanel.Children.OfType<WrapPanel>().SelectMany(w => w.Children.OfType<RadioButton>()))
                 rb.IsChecked = ((VoicePreset)rb.DataContext).Id == id;
         }
         finally { _syncing = false; }
@@ -172,7 +268,11 @@ public partial class MainWindow
     void SyncVoiceSliders()
     {
         _syncing = true;
-        try { foreach (var s in _voiceSliders) s.Slider.Value = s.Get(_settings.Voice); }
+        try
+        {
+            foreach (var s in _voiceSliders) s.Slider.Value = s.Get(_settings.Voice);
+            foreach (var c in _voiceChoices) c.Box.SelectedIndex = Math.Max(0, c.Get(_settings.Voice));
+        }
         finally { _syncing = false; }
     }
 

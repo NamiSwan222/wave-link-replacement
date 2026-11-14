@@ -11,40 +11,31 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 - **Microphone:** input level, mic boost, mute, live meter
 - **Sound cleanup:** AI noise removal, rumble filter, voice tones, and a Custom tone with five EQ sliders
 - **Voice polish:** leveler (compressor), de-esser, background silencer (expander) and peak protection (limiter)
-- **Voice changer:** Deep, Giant, Chipmunk, Robot, Alien, Phone call, Megaphone, Cave, Underwater, Ghost, or your own mix (pitch, robot, wobble, grit, echo, room). Like every other effect, it runs inside Windows' audio engine, so it never leaks into Discord streams
-- **App mixer:** volume, mute and output device per app
+- **Voice changer:** 28 voices (from Giant, Monster and Little kid to Auto-tune, Synth singer, Walkie-talkie and Canyon) or your own mix of pitch, formant, harmonics, octave layer, auto-tune, vocoder, ring mod, distortion, bitcrusher, modulation, radio, echo and reverb. Like every other effect, it runs inside Windows' audio engine, so it never leaks into Discord streams
+- **AI voices:** RVC voice models (add a `.pth` or find one online), running on your own PC
+- **App mixer:** volume, mute and output device per app, with each app's own icon
 - **Plugins:** add or scan for your own 64-bit VST2 effects, and open each one's own settings window (changes apply live)
 - **Soundboard:** add sound files and play them into your mic with a click or a key. They're mixed in inside Windows' audio engine, so they don't leak into Discord streams either
 - **Shortcuts:** global hotkeys: mute, push to talk, boost, voice changer on/off, next voice, a key for each sound, stop all sounds, and more. Numpad keys work on their own (no Ctrl needed)
 
 ## New in this version
 
-- **AI voices.** A new **AI voices** page: add an RVC voice model (the `.pth` file, or a `.zip` with one inside) and talk in that voice in Discord, games and every other app. Pick a voice, set its pitch (about +12 or -12 when the model's voice is much higher or lower than yours) and turn it on. It runs on your own PC, on your graphics card if you have one (about 0.35 s delay) or on the processor (slower). The first time, WaveFix downloads two shared models it needs (about 740 MB, once). Like every other effect, it can't leak into Discord streams. Turn on **Never send my real voice** if your mic should go silent rather than fall back to your normal voice when the AI voice isn't running.
-- **Strong noise removal.** Noise removal now has two types: **Standard** (as before) and **Strong**, a newer AI model (DeepFilterNet) built into WaveFix's audio engine. It removes keyboards, fans and background noise more cleanly and keeps your voice natural, with a slider for how much noise to remove. It adds about 40 ms of delay and uses very little CPU. After updating, click **Set it up for me** once to update the audio engine; until then Standard keeps running.
-- **Plugins page, reorganized.** Each plugin shows its place in the chain, an on/off switch and one **Open** button for its settings; moving, resetting and removing are under **⋯** (Remove asks first). Found plugins can be searched. Plugins that are installed but missing from your list show up under **Installed, not in your list**, ready to add back with one click.
-- **Fix: settings could stop saving.** If a plugin reported an invalid value for one of its knobs, WaveFix silently stopped saving all settings, so plugins (and everything else) were gone after a restart. It saves normally now, and if a save ever fails it's written to the log.
-- **Updates never lose your settings.** WaveFix now saves its settings so they can't be left half-written (for example when an update closes it mid-save), keeps the previous version as a backup and uses it if needed. Plugins, shortcuts, sounds and every other setting stay as they were, including ones from newer versions.
+After updating, click **Set it up for me** once (one Windows permission prompt): the new voice changer and noise removal live in the audio engine.
 
-- **Plugin windows show live readings.** When you open a plugin's settings (or Adjust on noise removal), WaveFix feeds it the live audio from your mic exactly as it reaches that plugin, so meters, gain reduction, analyzers and "learn" buttons work. The window says when it's live.
-- Plugins are hosted more like a real audio app (start/stop processing, sample rate, timing info), which some plugins need to work or to show anything.
-- After updating, WaveFix asks to **update the audio engine**: click **Set it up for me** once.
-- **Fix:** switching from Equalizer APO could leave "!KEY" entries in your mic's effect settings, which stopped Windows from running any of the mic's effects. WaveFix now shows the mic as not set up: click **Set it up for me** once to repair it.
-- **Test my effects** (Setup page): records from your mic for a moment and tells you whether WaveFix's engine is running on it, and what to do if not. It adds no sound, and runs by itself after setup.
-- **Clean uninstall:** uninstalling WaveFix (or **Remove the WaveFix engine** on the Setup page) takes the engine off every mic, puts their original settings back and deletes it from Program Files (one Windows permission prompt).
-- **Copy details for help** works even when another program is using the clipboard: WaveFix keeps trying for a moment, then saves the details as "WaveFix details.txt" on your Desktop and opens it.
-- **Important fix:** WaveFix's audio engine didn't actually run on your mic, so effects, boost and the soundboard had no effect, and on some mics recording stopped working altogether. Windows creates audio effects in a way the engine didn't support; it does now. After updating, WaveFix shows **Update the audio engine**: click **Set it up for me** once (one Windows permission prompt) and your effects reach the mic.
-- The Setup page now always stays in the sidebar, with **Copy details for help** and **Take the engine off this mic**.
-- **Copy details for help** (Setup page): copies what WaveFix and Windows report about your mic and the audio engine, including the engine's own log, to paste when something doesn't work.
-- Setup now waits up to 90 seconds for Windows audio to come back instead of failing after 20.
-- **Fix:** if Equalizer APO was on your mic but a different mic was selected when WaveFix started, setup could add WaveFix's engine without removing Equalizer APO and stop with "Windows didn't accept the mic setting". Setup now always takes Equalizer APO off the mic it's setting up, and cleans up a mic left half-switched by 0.8.2.
-- **Fix:** switching from Equalizer APO (or connecting the engine) could stop with "Windows didn't accept the mic setting" on some PCs, because setup gave up before the step that changes the mic had run. It now waits for that step to report back, and the setup log says exactly what went wrong if anything does.
-- **No more Equalizer APO.** WaveFix runs everything on its own audio engine now. Set up with Equalizer APO before? After this update the Setup page offers **one click** that moves your mic, settings and plugins to WaveFix's engine, puts your mic's original effects back, and uninstalls Equalizer APO (unless another device still uses it). Until you click it, nothing changes.
-- **Take the engine off this mic** on the Setup page puts your mic's original Windows settings back.
-
-## First-time setup is automatic
-
-Open WaveFix and click **Set it up for me**. After one Windows permission prompt it installs **WaveFix's audio engine**, adds the **[RNNoise](https://github.com/werman/noise-suppression-for-voice)** noise removal plugin, connects the effects to your mic (in the slot Discord can't skip), and restarts Windows audio. Every download is checked against a pinned fingerprint. Steps already done are skipped.
-
-## Verify the download
-
-Each installer has a matching `.sha256` file. WaveFix's updater refuses any download that doesn't match it.
+- **A much bigger voice changer.** A new voice engine changes your pitch while keeping your voice's character, so +5 sounds like a higher voice instead of a sped-up recording, and a new **Formant** control makes your voice bigger or smaller without changing the note. Also new:
+  - **Gender** (pitch and formant together), **Harmonics** (darker or brighter), **Octave layer** (a second voice below or above), **Detune** (metallic, alien) and **Breath** (whispery)
+  - **Auto-tune** that snaps you to the nearest note, and a **Vocoder** that plays your words as a synth chord
+  - **Distortion types** (overdrive, fuzz, megaphone), **Bitcrusher**, **Modulation** (chorus, flanger, phaser), **Radio** (old phone, walkie-talkie with squelch, police radio, AM radio) and **Echo styles** (slapback, canyon, rhythm)
+  - **28 voices** in groups, including Monster, Little kid, Whisper, Android, Synth singer, Walkie-talkie, Retro console, Jet and Canyon. Deep, Giant and Chipmunk now sound like bigger or smaller people instead of slowed-down or sped-up tape.
+- **AI voices, much better:**
+  - **No more babbling in pauses:** WaveFix learns your mic's background noise and keeps pauses silent.
+  - **Shorter delay:** picked automatically for your PC (about 0.2 s on a good graphics card) and adjusted as you go.
+  - **Find voices online:** search RVC voices on Hugging Face and add one with a click, including its index file.
+  - **Advanced settings:** silence threshold, loudness, the voice's index file and strength, and speaker (for models with several voices).
+  - **Voice pictures:** add a picture to any voice.
+- **Hear myself:** hear your mic in your headphones exactly as others hear it, effects and AI voice included (Microphone page).
+- **Set up my mic for me:** stay quiet for a moment, read a sentence, and WaveFix sets your input level, boost, noise removal, rumble filter, leveler and tone. Nothing changes until you click Apply.
+- **Find sounds online** for the soundboard: openly licensed sounds (Freesound, Wikimedia and more), with a preview and the creator's credit kept.
+- **Plugin search is remembered:** **Find plugins on this PC** shows the last search instantly; **Scan again** looks again.
+- **New look:** a calmer plum-dark theme with Inter and IBM Plex Serif fonts, a reorganized sidebar with grouped pages, a quick mute control and live level in the sidebar, and **Setup & help** at the bottom (Start with Windows and Auto-update moved there).
+- **App mixer** shows each app's own icon.

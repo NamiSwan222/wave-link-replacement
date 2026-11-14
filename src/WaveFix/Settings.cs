@@ -56,6 +56,9 @@ public sealed class AppSettings
     public VoiceSettings Voice { get; set; } = new();
     public SoundboardSettings Soundboard { get; set; } = new();
     public Rvc.AiVoiceSettings AiVoice { get; set; } = new();
+    /// <summary>Play the mic (with every effect) to your speakers or headphones.</summary>
+    public bool HearMyself { get; set; }
+    public double HearMyselfVolume { get; set; } = 80;
 
     static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WaveFix");
     static string FilePath => Path.Combine(Folder, "settings.json");

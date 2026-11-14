@@ -17,7 +17,7 @@
         <!-- ============ Sidebar ============ -->
         <Border Background="{StaticResource Sidebar}" BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
             <DockPanel Margin="18,22,18,18">
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,0,0,28">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,0,0,24">
                     <Border Width="40" Height="40" CornerRadius="12" Background="{StaticResource Primary}">
                         <TextBlock Text="&#xE720;" Style="{StaticResource Icon}" FontSize="19" HorizontalAlignment="Center"/>
                     </Border>
@@ -33,10 +33,10 @@
                             BorderBrush="{StaticResource Primary}" BorderThickness="1" Visibility="Collapsed">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="14" Foreground="#C7D2FE" Margin="0,0,8,0"/>
+                                <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="14" Foreground="#E3D7EE" Margin="0,0,8,0"/>
                                 <TextBlock x:Name="UpdateTitle" Text="Update available" FontWeight="Bold" FontSize="13.5"/>
                             </StackPanel>
-                            <TextBlock x:Name="UpdateText" Style="{StaticResource Hint}" Foreground="#C7D2FE" Margin="0,0,0,10"/>
+                            <TextBlock x:Name="UpdateText" Style="{StaticResource Hint}" Foreground="#E3D7EE" Margin="0,0,0,10"/>
                             <Button x:Name="UpdateButton" Style="{StaticResource PrimaryButton}" Height="36" Click="UpdateNow_Click"
                                     AutomationProperties.Name="Install the update now">
                                 <TextBlock x:Name="UpdateButtonText" Text="Update now" FontWeight="Bold" FontSize="13" Foreground="White"/>
@@ -44,32 +44,41 @@
                         </StackPanel>
                     </Border>
 
-                    <Border x:Name="StatusPill" CornerRadius="12" Padding="12,10" Background="{StaticResource GoodSoft}" Margin="0,0,0,14">
+                    <!-- Quick mic: mute and a live level, from any page -->
+                    <Border CornerRadius="14" Background="{StaticResource CardBg}" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="10" Margin="0,0,0,10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <ToggleButton Style="{StaticResource MuteButton}" IsChecked="{Binding Mic.Muted}" Width="40" Height="36" Padding="0"
+                                          ToolTip="Mute or unmute your mic" AutomationProperties.Name="Mute microphone (sidebar)">
+                                <TextBlock x:Name="SideMuteIcon" Text="&#xE720;" Style="{StaticResource Icon}" FontSize="15"/>
+                            </ToggleButton>
+                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                                <TextBlock x:Name="SideMicText" Text="Mic on" FontSize="12.5" FontWeight="SemiBold"/>
+                                <ProgressBar Value="{Binding Mic.Level, Mode=OneWay}" Minimum="0" Maximum="1" Height="4" Margin="0,5,0,0"
+                                             Foreground="{StaticResource Good}" Background="{StaticResource Surface}" BorderThickness="0"
+                                             AutomationProperties.Name="Mic level"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <RadioButton x:Name="NavSetup" Style="{StaticResource NavItem}" GroupName="nav" Content="Setup &amp; help" Tag="&#xE713;" Checked="Nav_Checked" Margin="0,0,0,8"/>
+                    <Border x:Name="StatusPill" CornerRadius="12" Padding="12,10" Background="{StaticResource GoodSoft}" Margin="0,0,0,0">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="StatusDot" Width="9" Height="9" Fill="{StaticResource Good}" VerticalAlignment="Center"/>
                             <TextBlock x:Name="StatusPillText" Text="All good" FontSize="13" FontWeight="SemiBold" Margin="9,0,0,0" TextWrapping="Wrap" MaxWidth="160"/>
                         </StackPanel>
                     </Border>
-                    <CheckBox x:Name="StartupSwitch" Style="{StaticResource Switch}" Checked="StartupSwitch_Changed" Unchecked="StartupSwitch_Changed"
-                              AutomationProperties.Name="Start WaveFix with Windows" Margin="4,0,0,0">
-                        <TextBlock Text="Start with Windows" FontSize="13" Foreground="{StaticResource SubText}"/>
-                    </CheckBox>
-                    <CheckBox x:Name="AutoUpdateSwitch" Style="{StaticResource Switch}" Checked="AutoUpdate_Changed" Unchecked="AutoUpdate_Changed"
-                              AutomationProperties.Name="Install updates automatically" Margin="4,10,0,0">
-                        <TextBlock Text="Auto-update" FontSize="13" Foreground="{StaticResource SubText}"/>
-                    </CheckBox>
-                    <Button Style="{StaticResource LinkButton}" Margin="4,12,0,0" HorizontalAlignment="Left" Click="CheckUpdates_Click"
-                            AutomationProperties.Name="Check for updates">
-                        <TextBlock x:Name="VersionText" FontSize="12" Foreground="{StaticResource SubText}"/>
-                    </Button>
                 </StackPanel>
 
                 <StackPanel>
-                    <RadioButton x:Name="NavSetup" Style="{StaticResource NavItem}" GroupName="nav" Content="Setup" Tag="&#xE713;" Checked="Nav_Checked"/>
+                    <TextBlock Text="Your voice" Style="{StaticResource NavGroup}"/>
                     <RadioButton x:Name="NavMic" Style="{StaticResource NavItem}" GroupName="nav" Content="Microphone" Tag="&#xE720;" IsChecked="True" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavVoice" Style="{StaticResource NavItem}" GroupName="nav" Content="Voice changer" Tag="&#xE8D6;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavAi" Style="{StaticResource NavItem}" GroupName="nav" Content="AI voices" Tag="&#xE99A;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavSoundboard" Style="{StaticResource NavItem}" GroupName="nav" Content="Soundboard" Tag="&#xE7F6;" Checked="Nav_Checked"/>
+                    <TextBlock Text="Apps &amp; extras" Style="{StaticResource NavGroup}" Margin="14,14,0,6"/>
                     <RadioButton x:Name="NavMixer" Style="{StaticResource NavItem}" GroupName="nav" Content="App mixer" Tag="&#xE767;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavPlugins" Style="{StaticResource NavItem}" GroupName="nav" Content="Plugins" Tag="&#xEA86;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavShortcuts" Style="{StaticResource NavItem}" GroupName="nav" Content="Shortcuts" Tag="&#xE765;" Checked="Nav_Checked"/>
@@ -100,7 +109,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <Border Width="32" Height="32" CornerRadius="16" Background="#25253D" VerticalAlignment="Top">
+                                            <Border Width="32" Height="32" CornerRadius="16" Background="#221F2C" VerticalAlignment="Top">
                                                 <TextBlock Text="{Binding Glyph}" Style="{StaticResource Icon}" FontSize="14" Foreground="{Binding Color}" HorizontalAlignment="Center"/>
                                             </Border>
                                             <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
@@ -178,23 +187,41 @@
                         </StackPanel>
                     </Border>
 
-                    <Border CornerRadius="12" Background="#16162B" Padding="14,12">
+                    <Border CornerRadius="12" Background="#1C1925" Padding="14,12">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="#CDBBDD" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock x:Name="SetupNote" Grid.Column="1" Style="{StaticResource Hint}" TextWrapping="Wrap"
                                        Text="Windows will ask for permission once. Your sound drops for a few seconds at the end while Windows audio restarts."/>
                         </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+                        <StackPanel>
+                            <TextBlock Text="WaveFix" Style="{StaticResource CardTitle}" Margin="0,0,0,14"/>
+                        <CheckBox x:Name="StartupSwitch" Style="{StaticResource Switch}" Checked="StartupSwitch_Changed" Unchecked="StartupSwitch_Changed"
+                                  AutomationProperties.Name="Start WaveFix with Windows" Margin="0">
+                            <TextBlock Text="Start with Windows" Style="{StaticResource Label}"/>
+                        </CheckBox>
+                        <CheckBox x:Name="AutoUpdateSwitch" Style="{StaticResource Switch}" Checked="AutoUpdate_Changed" Unchecked="AutoUpdate_Changed"
+                                  AutomationProperties.Name="Install updates automatically" Margin="0,14,0,0">
+                            <TextBlock Text="Auto-update" Style="{StaticResource Label}"/>
+                        </CheckBox>
+                        <Button Style="{StaticResource LinkButton}" Margin="0,16,0,0" HorizontalAlignment="Left" Click="CheckUpdates_Click"
+                                AutomationProperties.Name="Check for updates">
+                            <TextBlock x:Name="VersionText" FontSize="12" Foreground="{StaticResource SubText}"/>
+                        </Button>
+                        </StackPanel>
                     </Border>
                 </StackPanel>
             </ScrollViewer>
 
             <!-- ===== Microphone ===== -->
             <ScrollViewer x:Name="PageMic" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26">
-                <StackPanel>
+                <StackPanel MaxWidth="1100" HorizontalAlignment="Left">
                     <TextBlock Text="Your microphone" Style="{StaticResource PageTitle}"/>
                     <TextBlock Text="Sound clean and clear everywhere, without your mic leaking into Discord streams." Style="{StaticResource PageSubtitle}"/>
 
@@ -211,7 +238,7 @@
                                 <TextBlock Text="Set it up for me" FontWeight="Bold" FontSize="13.5" Foreground="White"/>
                             </Button>
                             <Border x:Name="BannerIconBg" Width="34" Height="34" CornerRadius="17" Background="{StaticResource Good}" VerticalAlignment="Top">
-                                <TextBlock x:Name="BannerIcon" Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="15" Foreground="#0F0F23" HorizontalAlignment="Center"/>
+                                <TextBlock x:Name="BannerIcon" Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="15" Foreground="#13111A" HorizontalAlignment="Center"/>
                             </Border>
                             <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
                                 <TextBlock x:Name="BannerTitle" Text="You're all set" FontSize="15" FontWeight="Bold"/>
@@ -230,7 +257,16 @@
                         <!-- Level & volume -->
                         <Border Style="{StaticResource Card}" VerticalAlignment="Top">
                             <StackPanel>
-                                <TextBlock Text="Level &amp; volume" Style="{StaticResource CardTitle}" Margin="0,0,0,16"/>
+                                <DockPanel Margin="0,0,0,16">
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Click="MicSetup_Click"
+                                            ToolTip="Talk for a few seconds and WaveFix sets your level, noise removal and tone" AutomationProperties.Name="Set up my mic for me">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE9F5;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,8,0"/>
+                                            <TextBlock Text="Set up my mic for me" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <TextBlock Text="Level &amp; volume" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
+                                </DockPanel>
 
                                 <TextBlock Text="Microphone" Style="{StaticResource Label}" Margin="0,0,0,8"/>
                                 <ComboBox ItemsSource="{Binding Mic.Devices}" SelectedItem="{Binding Mic.Selected}" Margin="0,0,0,20"
@@ -240,7 +276,7 @@
                                     <TextBlock x:Name="MeterHint" DockPanel.Dock="Right" Style="{StaticResource Hint}" Text="Talk to see your level"/>
                                     <TextBlock Text="Live level" Style="{StaticResource Label}"/>
                                 </DockPanel>
-                                <Border Height="16" CornerRadius="8" Background="#25253D" ClipToBounds="True" Margin="0,0,0,22">
+                                <Border Height="16" CornerRadius="8" Background="#221F2C" ClipToBounds="True" Margin="0,0,0,22">
                                     <Grid x:Name="MeterHost">
                                         <Border x:Name="MeterFill" HorizontalAlignment="Left" CornerRadius="8" Width="0">
                                             <Border.Background>
@@ -277,6 +313,23 @@
                                         <TextBlock x:Name="MuteLabel" Text="Mic is on, click to mute" FontSize="15" FontWeight="Bold" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </ToggleButton>
+
+                                <CheckBox x:Name="HearMyselfMicSwitch" Style="{StaticResource Switch}" Margin="0,20,0,0" Click="HearMyselfSwitch_Click" AutomationProperties.Name="Hear myself">
+                                    <StackPanel>
+                                        <TextBlock Text="Hear myself" Style="{StaticResource Label}"/>
+                                        <TextBlock Text="Plays your mic to your headphones exactly as others hear it, effects and AI voice included." Style="{StaticResource Hint}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </CheckBox>
+                                <StackPanel x:Name="HearMyselfPanel" Margin="0,10,0,0" Visibility="Collapsed">
+                                    <DockPanel Margin="0,0,0,2">
+                                        <TextBlock x:Name="HearMyselfValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Volume" Style="{StaticResource Label}"/>
+                                    </DockPanel>
+                                    <Slider x:Name="HearMyselfSlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10" ValueChanged="HearMyselfVolume_Changed" AutomationProperties.Name="Hear myself volume"/>
+                                    <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                               Text="Use headphones (speakers would echo into your mic). While it's on, a screen share with sound also carries your voice, so turn it off before streaming."/>
+                                    <TextBlock x:Name="HearMyselfError" Style="{StaticResource Hint}" Foreground="{StaticResource Warn}" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
 
@@ -342,13 +395,13 @@
                                     <StackPanel x:Name="CustomEqBands"/>
                                 </StackPanel>
 
-                                <Border CornerRadius="12" Background="#16162B" Padding="14,12" Margin="0,8,0,0">
+                                <Border CornerRadius="12" Background="#1C1925" Padding="14,12" Margin="0,8,0,0">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                                        <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#CDBBDD" VerticalAlignment="Top" Margin="0,1,10,0"/>
                                         <TextBlock Grid.Column="1" Style="{StaticResource Hint}"
                                                    Text="All of this runs inside Windows' own audio engine, so Discord streams can't pick up your mic."/>
                                     </Grid>
@@ -432,7 +485,7 @@
 
             <!-- ===== Voice changer ===== -->
             <ScrollViewer x:Name="PageVoice" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26">
-                <StackPanel>
+                <StackPanel MaxWidth="1100" HorizontalAlignment="Left">
                     <TextBlock Text="Voice changer" Style="{StaticResource PageTitle}"/>
                     <TextBlock Text="Sound like someone (or something) else in Discord, games and every other app." Style="{StaticResource PageSubtitle}"/>
 
@@ -453,7 +506,7 @@
                     <Border Style="{StaticResource Card}" Margin="0,0,0,20">
                         <StackPanel>
                             <TextBlock Text="Voices" Style="{StaticResource CardTitle}" Margin="0,0,0,14"/>
-                            <WrapPanel x:Name="VoicePresetPanel"/>
+                            <StackPanel x:Name="VoicePresetPanel"/>
                         </StackPanel>
                     </Border>
 
@@ -476,13 +529,13 @@
                         </StackPanel>
                     </Border>
 
-                    <Border CornerRadius="12" Background="#16162B" Padding="14,12">
+                    <Border CornerRadius="12" Background="#1C1925" Padding="14,12">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#CDBBDD" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock Grid.Column="1" Style="{StaticResource Hint}" TextWrapping="Wrap"
                                        Text="Like your other effects, the voice changer runs inside Windows' audio engine, so Discord streams still can't pick up your mic. Changing pitch adds a small delay (about 40 ms). Set a shortcut to switch voices mid-game."/>
                         </Grid>
@@ -494,7 +547,7 @@
             <!-- ===== AI voices ===== -->
             <ScrollViewer x:Name="PageAi" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26"
                           AllowDrop="True" DragOver="AiVoices_DragOver" Drop="AiVoices_Drop">
-                <StackPanel>
+                <StackPanel MaxWidth="1100" HorizontalAlignment="Left">
                     <TextBlock Text="AI voices" Style="{StaticResource PageTitle}"/>
                     <TextBlock Text="Sound like a different person with an RVC voice model. It runs on your PC, inside WaveFix: your voice isn't sent anywhere." Style="{StaticResource PageSubtitle}"/>
 
@@ -521,7 +574,7 @@
                             <TextBlock Text="One-time download" Style="{StaticResource CardTitle}" Margin="0,0,0,6"/>
                             <TextBlock x:Name="AiDownloadText" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,14"/>
                             <ProgressBar x:Name="AiDownloadProgress" Height="6" Minimum="0" Maximum="1" Margin="0,0,0,14" Visibility="Collapsed"
-                                         Foreground="{StaticResource Primary}" Background="{StaticResource Surface}" BorderThickness="0"/>
+                                         Foreground="{StaticResource PrimaryLine}" Background="{StaticResource Surface}" BorderThickness="0"/>
                             <StackPanel Orientation="Horizontal">
                                 <Button x:Name="AiDownloadButton" Style="{StaticResource PrimaryButton}" Height="38" Padding="16,0" Click="AiDownload_Click" AutomationProperties.Name="Download AI voice support">
                                     <TextBlock Text="Download" FontWeight="Bold" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
@@ -542,11 +595,70 @@
                                         <TextBlock Text="Add voice model" FontWeight="Bold" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
+                                <Button DockPanel.Dock="Right" Style="{StaticResource SoftButton}" Height="38" Padding="14,0" Margin="0,0,8,0" Click="AiBrowse_Click" AutomationProperties.Name="Find voices online">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,8,0"/>
+                                        <TextBlock Text="Find voices online" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
                                 <TextBlock Text="Voices" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
                             </DockPanel>
                             <TextBlock x:Name="AiEmpty" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,8"
                                        Text="No voices yet. Click Add voice model (or drop a file here) and pick an RVC model: the .pth file, usually 50 to 60 MB. v1 and v2 models at 32, 40 or 48 kHz work. Index files (.index) aren't needed."/>
                             <WrapPanel x:Name="AiVoiceList"/>
+
+                            <!-- Voices online (Hugging Face) -->
+                            <Border x:Name="AiBrowseCard" CornerRadius="12" Background="{StaticResource CardRaised}" BorderBrush="#4A3D55" BorderThickness="1" Padding="16,14" Margin="0,10,0,4" Visibility="Collapsed">
+                                <StackPanel>
+                                    <DockPanel Margin="0,0,0,8">
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Click="AiBrowseClose_Click" AutomationProperties.Name="Close voice search">
+                                            <TextBlock Text="Done" FontWeight="SemiBold" FontSize="12.5"/>
+                                        </Button>
+                                        <TextBlock Text="Voices online" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                    <Grid Margin="0,0,0,10">
+                                        <TextBox x:Name="AiBrowseSearch" Style="{StaticResource SearchBox}" KeyDown="AiBrowseSearch_KeyDown" TextChanged="AiBrowseSearch_Changed" AutomationProperties.Name="Search voices online"/>
+                                        <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="13" Foreground="{StaticResource SubText}" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                        <TextBlock x:Name="AiBrowseHint" Text="Search, then press Enter (empty shows the most popular)" Foreground="{StaticResource SubText}" FontSize="13.5" Margin="35,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                    </Grid>
+                                    <TextBlock x:Name="AiBrowseStatus" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl x:Name="AiBrowseResults">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border CornerRadius="10" Background="{StaticResource Surface}" Padding="14,8" Margin="0,0,6,6">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                                                <TextBlock Text="{Binding Name}" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding Details}" Style="{StaticResource Hint}" FontSize="11.5" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                                <Button Style="{StaticResource LinkButton}" Margin="0,0,12,0" VerticalAlignment="Center" Click="AiBrowsePage_Click" Tag="{Binding}" ToolTip="Open its page (license and details)"
+                                                                        AutomationProperties.Name="{Binding Name, StringFormat=Open the page for {0}}">
+                                                                    <TextBlock Text="Page" FontSize="12.5" Foreground="{StaticResource SubText}"/>
+                                                                </Button>
+                                                                <Button Style="{StaticResource PrimaryButton}" Height="32" Padding="14,0" Click="AiBrowseAdd_Click" Tag="{Binding}"
+                                                                        AutomationProperties.Name="{Binding Name, StringFormat=Add the voice {0}}">
+                                                                    <StackPanel Orientation="Horizontal">
+                                                                        <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="11" Foreground="White" Margin="0,0,8,0"/>
+                                                                        <TextBlock Text="Add" FontWeight="Bold" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
+                                                                    </StackPanel>
+                                                                </Button>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                    <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                               Text="From Hugging Face, where people share RVC voices. Check each voice's license on its page. Only use voices you're allowed to, and don't use someone's voice to pretend to be them."/>
+                                </StackPanel>
+                            </Border>
                             <TextBlock x:Name="AiImportText" Style="{StaticResource Hint}" Margin="0,6,0,0" Visibility="Collapsed"/>
                         </StackPanel>
                     </Border>
@@ -573,16 +685,100 @@
                                     <TextBlock Text="If the AI voice stops (it's starting up, your PC can't keep up, or WaveFix closed), your mic goes silent instead of falling back to your normal voice." Style="{StaticResource Hint}" Margin="0,2,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </CheckBox>
+                            <CheckBox x:Name="HearMyselfAiSwitch" Style="{StaticResource Switch}" Margin="0,14,0,0" Click="HearMyselfSwitch_Click" AutomationProperties.Name="Hear myself (AI voices page)">
+                                <StackPanel>
+                                    <TextBlock Text="Hear myself" Style="{StaticResource Label}"/>
+                                    <TextBlock Text="Hear the AI voice in your headphones as others hear it (volume on the Microphone page)." Style="{StaticResource Hint}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </CheckBox>
                         </StackPanel>
                     </Border>
 
-                    <Border CornerRadius="12" Background="#16162B" Padding="14,12">
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                        <StackPanel>
+                            <Button Style="{StaticResource LinkButton}" Click="AiAdvancedToggle_Click" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Show advanced AI voice settings">
+                                <DockPanel>
+                                    <TextBlock x:Name="AiAdvancedChevron" DockPanel.Dock="Right" Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="12" Foreground="{StaticResource SubText}" VerticalAlignment="Center"/>
+                                    <StackPanel>
+                                        <TextBlock Text="Advanced" Style="{StaticResource CardTitle}"/>
+                                        <TextBlock Text="Background noise, loudness, index file and speaker. The defaults suit most models." Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Button>
+                            <StackPanel x:Name="AiAdvancedPanel" Margin="0,18,0,0" Visibility="Collapsed">
+                                <CheckBox x:Name="AiAutoGateSwitch" Style="{StaticResource Switch}" Click="AiAdvancedOption_Click" AutomationProperties.Name="Ignore background noise automatically">
+                                    <StackPanel>
+                                        <TextBlock Text="Ignore background noise automatically" Style="{StaticResource Label}"/>
+                                        <TextBlock Text="Learns your mic's background noise, so pauses stay silent instead of the AI babbling." Style="{StaticResource Hint}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </CheckBox>
+                                <DockPanel Margin="0,16,0,2">
+                                    <TextBlock x:Name="AiGateValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Silence threshold" Style="{StaticResource Label}"/>
+                                </DockPanel>
+                                <Slider x:Name="AiGateSlider" Minimum="-70" Maximum="-20" TickFrequency="1" IsSnapToTickEnabled="True" SmallChange="1" LargeChange="5"
+                                        ValueChanged="AiGate_Changed" AutomationProperties.Name="Silence threshold"/>
+                                <TextBlock x:Name="AiGateHint" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+
+                                <DockPanel Margin="0,16,0,2">
+                                    <TextBlock x:Name="AiLoudnessValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Loudness" Style="{StaticResource Label}"/>
+                                </DockPanel>
+                                <Slider x:Name="AiLoudnessSlider" Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True" SmallChange="5" LargeChange="25"
+                                        ValueChanged="AiVoiceAdvanced_Changed" AutomationProperties.Name="AI voice loudness mix"/>
+                                <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,2,0,0"
+                                           Text="Left: the AI voice follows how loud you speak (most natural). Right: the model's own loudness. Saved per voice."/>
+
+                                <DockPanel Margin="0,16,0,6">
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <Button x:Name="AiIndexAddButton" Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Click="AiIndexAdd_Click" AutomationProperties.Name="Add an index file">
+                                            <TextBlock Text="Add index file…" FontWeight="SemiBold" FontSize="12.5"/>
+                                        </Button>
+                                        <Button x:Name="AiIndexRemoveButton" Style="{StaticResource LinkButton}" Margin="10,0,0,0" VerticalAlignment="Center" Click="AiIndexRemove_Click" AutomationProperties.Name="Remove the index file">
+                                            <TextBlock Text="Remove" FontSize="12.5" Foreground="{StaticResource SubText}"/>
+                                        </Button>
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock Text="Index file" Style="{StaticResource Label}"/>
+                                        <TextBlock x:Name="AiIndexName" Style="{StaticResource Hint}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </DockPanel>
+                                <StackPanel x:Name="AiIndexRatePanel">
+                                    <DockPanel Margin="0,4,0,2">
+                                        <TextBlock x:Name="AiIndexRateValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Index strength" Style="{StaticResource Label}"/>
+                                    </DockPanel>
+                                    <Slider x:Name="AiIndexRateSlider" Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True" SmallChange="5" LargeChange="25"
+                                            ValueChanged="AiVoiceAdvanced_Changed" AutomationProperties.Name="Index strength"/>
+                                </StackPanel>
+                                <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,2,0,0"
+                                           Text="The .index file that often comes with a voice model (the one named added_…). It pulls the voice toward the original speaker's accent and tone. Higher sounds more like them but can blur words; 50 to 75% suits most."/>
+
+                                <StackPanel x:Name="AiSpeakerPanel" Visibility="Collapsed">
+                                    <DockPanel Margin="0,16,0,2">
+                                        <TextBlock x:Name="AiSpeakerValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Speaker" Style="{StaticResource Label}"/>
+                                    </DockPanel>
+                                    <Slider x:Name="AiSpeakerSlider" Minimum="0" Maximum="1" TickFrequency="1" IsSnapToTickEnabled="True" SmallChange="1" LargeChange="1"
+                                            ValueChanged="AiVoiceAdvanced_Changed" AutomationProperties.Name="Speaker"/>
+                                    <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,2,0,0"
+                                               Text="This model holds several voices; pick which one you sound like."/>
+                                </StackPanel>
+
+                                <Button Style="{StaticResource LinkButton}" Margin="0,16,0,0" HorizontalAlignment="Left" Click="AiAdvancedReset_Click" AutomationProperties.Name="Reset advanced settings">
+                                    <TextBlock Text="Reset advanced settings" FontSize="12.5" Foreground="{StaticResource SubText}"/>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border CornerRadius="12" Background="#1C1925" Padding="14,12">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#CDBBDD" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock Grid.Column="1" Style="{StaticResource Hint}" TextWrapping="Wrap"
                                        Text="AI voices add a delay (about 0.4 s with a graphics card, more without one). The voice changer and other effects still apply on top. Only use voice models you're allowed to, and don't use someone's voice to pretend to be them."/>
                         </Grid>
@@ -592,7 +788,7 @@
 
             <ScrollViewer x:Name="PageSoundboard" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26"
                           AllowDrop="True" DragOver="Soundboard_DragOver" Drop="Soundboard_Drop">
-                <StackPanel>
+                <StackPanel MaxWidth="1100" HorizontalAlignment="Left">
                     <TextBlock Text="Soundboard" Style="{StaticResource PageTitle}"/>
                     <TextBlock Text="Play sound effects into your mic. Everyone in Discord, games and calls hears them." Style="{StaticResource PageSubtitle}"/>
 
@@ -641,6 +837,12 @@
                                             <TextBlock Text="Stop all" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
+                                    <Button Style="{StaticResource SoftButton}" Height="38" Padding="14,0" Margin="0,0,8,0" Click="SoundBrowse_Click" AutomationProperties.Name="Find sounds online">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,8,0"/>
+                                            <TextBlock Text="Find sounds online" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
                                     <Button x:Name="AddSoundsButton" Style="{StaticResource PrimaryButton}" Height="38" Padding="16,0" Click="AddSounds_Click" AutomationProperties.Name="Add sounds">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" FontSize="12" Foreground="White" Margin="0,0,8,0"/>
@@ -650,6 +852,59 @@
                                 </StackPanel>
                                 <TextBlock Text="Sounds" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
                             </DockPanel>
+
+                            <!-- Sounds online (Openverse) -->
+                            <Border x:Name="SoundBrowseCard" CornerRadius="12" Background="{StaticResource CardRaised}" BorderBrush="#4A3D55" BorderThickness="1" Padding="16,14" Margin="0,0,0,14" Visibility="Collapsed">
+                                <StackPanel>
+                                    <DockPanel Margin="0,0,0,8">
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Click="SoundBrowseClose_Click" AutomationProperties.Name="Close sound search">
+                                            <TextBlock Text="Done" FontWeight="SemiBold" FontSize="12.5"/>
+                                        </Button>
+                                        <TextBlock Text="Sounds online" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                    <Grid Margin="0,0,0,10">
+                                        <TextBox x:Name="SoundBrowseSearch" Style="{StaticResource SearchBox}" KeyDown="SoundBrowseSearch_KeyDown" TextChanged="SoundBrowseSearch_Changed" AutomationProperties.Name="Search sounds online"/>
+                                        <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="13" Foreground="{StaticResource SubText}" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                        <TextBlock x:Name="SoundBrowseHint" Text="Search, like airhorn, applause or drum roll, then press Enter" Foreground="{StaticResource SubText}" FontSize="13.5" Margin="35,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                    </Grid>
+                                    <TextBlock x:Name="SoundBrowseStatus" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl x:Name="SoundBrowseResults">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border CornerRadius="10" Background="{StaticResource Surface}" Padding="14,8" Margin="0,0,6,6">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                                                <TextBlock Text="{Binding Title}" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding Details}" Style="{StaticResource Hint}" FontSize="11.5" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                                <Button Style="{StaticResource SoftButton}" Height="32" Padding="12,0" Margin="0,0,8,0" Click="SoundBrowsePlay_Click" Tag="{Binding}" ToolTip="Preview (only you hear it)"
+                                                                        AutomationProperties.Name="{Binding Title, StringFormat=Preview {0}}">
+                                                                    <TextBlock Text="&#xE768;" Style="{StaticResource Icon}" FontSize="11"/>
+                                                                </Button>
+                                                                <Button Style="{StaticResource PrimaryButton}" Height="32" Padding="14,0" Click="SoundBrowseAdd_Click" Tag="{Binding}"
+                                                                        AutomationProperties.Name="{Binding Title, StringFormat=Add the sound {0}}">
+                                                                    <StackPanel Orientation="Horizontal">
+                                                                        <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" FontSize="11" Foreground="White" Margin="0,0,8,0"/>
+                                                                        <TextBlock Text="Add" FontWeight="Bold" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
+                                                                    </StackPanel>
+                                                                </Button>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                    <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                               Text="Openly licensed sounds from Freesound, Wikimedia Commons and more, found with Openverse. Each keeps its credit (hover a sound on your board). CC0 sounds are free for anything; CC BY ones ask you to credit the creator if you share recordings."/>
+                                </StackPanel>
+                            </Border>
 
                             <TextBlock x:Name="EmptySounds" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,4,0,8"
                                        Text="No sounds yet. Click Add sounds or drop files here: MP3, WAV, M4A, WMA, AAC or FLAC, up to 15 minutes each. Click a sound to play it."/>
@@ -669,7 +924,7 @@
                                     <DataTemplate>
                                         <Grid Width="168" Margin="0,0,10,10">
                                             <Button Style="{StaticResource SoftButton}" Height="72" HorizontalContentAlignment="Stretch" Padding="14,0,34,0" Click="PlaySound_Click" Tag="{Binding}"
-                                                    ToolTip="Play" AutomationProperties.Name="{Binding Name, StringFormat=Play {0}}">
+                                                    ToolTip="{Binding Tip}" AutomationProperties.Name="{Binding Name, StringFormat=Play {0}}">
                                                 <StackPanel VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="13.5" TextTrimming="CharacterEllipsis"/>
                                                     <TextBlock Text="{Binding KeyText}" FontSize="11.5" Foreground="{StaticResource SubText}" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
@@ -686,13 +941,13 @@
                         </StackPanel>
                     </Border>
 
-                    <Border CornerRadius="12" Background="#16162B" Padding="14,12">
+                    <Border CornerRadius="12" Background="#1C1925" Padding="14,12">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#CDBBDD" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock Grid.Column="1" Style="{StaticResource Hint}" TextWrapping="Wrap"
                                        Text="Sounds are mixed into your mic inside Windows' audio engine, after the voice changer, so they aren't pitched and your mic still stays out of Discord streams. Give each sound a key on the Shortcuts page. If you Go Live with Hear sounds myself on, your stream picks up your own copy too, so viewers may hear sounds twice."/>
                         </Grid>
@@ -733,7 +988,10 @@
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <Border Width="38" Height="38" CornerRadius="12" Background="{StaticResource PrimarySoft}">
-                                                <TextBlock Text="{Binding Initial}" FontWeight="ExtraBold" FontSize="16" Foreground="#C7D2FE" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <Grid>
+                                                    <TextBlock Text="{Binding Initial}" Visibility="{Binding InitialVisibility}" FontWeight="ExtraBold" FontSize="16" Foreground="#E3D7EE" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    <Image Source="{Binding Icon}" Width="26" Height="26" RenderOptions.BitmapScalingMode="HighQuality" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Grid>
                                             </Border>
                                             <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="15" FontWeight="Bold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="12,0,8,0"/>
                                             <ToggleButton Grid.Column="2" Style="{StaticResource MuteButton}" IsChecked="{Binding Muted}" Width="44" Height="38" Padding="0"
@@ -763,7 +1021,7 @@
 
             <!-- ===== Plugins ===== -->
             <ScrollViewer x:Name="PagePlugins" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26">
-                <StackPanel>
+                <StackPanel MaxWidth="1100" HorizontalAlignment="Left">
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
                             <Button x:Name="ScanButton" Style="{StaticResource SoftButton}" Height="44" Padding="16,0" Margin="0,0,10,0"
@@ -820,7 +1078,7 @@
                     </Border>
 
                     <!-- Scan results -->
-                    <Border x:Name="ScanCard" Style="{StaticResource Card}" Margin="0,0,0,16" Visibility="Collapsed" BorderBrush="#3B3B7A">
+                    <Border x:Name="ScanCard" Style="{StaticResource Card}" Margin="0,0,0,16" Visibility="Collapsed" BorderBrush="#4A3D55">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,4">
                                 <Button DockPanel.Dock="Right" Style="{StaticResource SoftButton}" Height="34" Padding="12,0" Click="CloseScan_Click" AutomationProperties.Name="Close scan results">
@@ -903,7 +1161,7 @@
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
                                                     <Border Width="28" Height="28" CornerRadius="14" Background="{StaticResource PrimarySoft}" VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding Position}" FontWeight="Bold" FontSize="12.5" Foreground="#C7D2FE" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        <TextBlock Text="{Binding Position}" FontWeight="Bold" FontSize="12.5" Foreground="#E3D7EE" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                     </Border>
                                                     <StackPanel Grid.Column="1" Margin="14,0,12,0" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Name}" Style="{StaticResource Label}" FontSize="14.5" TextTrimming="CharacterEllipsis"/>
@@ -945,9 +1203,9 @@
                         </StackPanel>
                     </Border>
 
-                    <Border CornerRadius="12" Background="#16162B" Padding="14,12">
+                    <Border CornerRadius="12" Background="#1C1925" Padding="14,12">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="#CDBBDD" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock Style="{StaticResource Hint}" MaxWidth="700" TextWrapping="Wrap"
                                        Text="Settings you make in a plugin's window are saved and used on your mic. WaveFix copies each plugin to C:\Program Files\WaveFix\Plugins (Windows asks once), the only place its audio engine loads code from. 64-bit VST2 plugins (.dll) only."/>
                         </StackPanel>
@@ -957,7 +1215,7 @@
 
             <!-- ===== Shortcuts ===== -->
             <ScrollViewer x:Name="PageShortcuts" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26">
-                <StackPanel>
+                <StackPanel MaxWidth="1100" HorizontalAlignment="Left">
                     <TextBlock Text="Shortcuts" Style="{StaticResource PageTitle}"/>
                     <TextBlock Text="Pick keys that work anywhere, even while you're in a game." Style="{StaticResource PageSubtitle}"/>
 
@@ -973,7 +1231,7 @@
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
                                         <Border Width="42" Height="42" CornerRadius="12" Background="{StaticResource PrimarySoft}" VerticalAlignment="Top">
-                                            <TextBlock Text="{Binding Action.Glyph}" Style="{StaticResource Icon}" FontSize="18" Foreground="#C7D2FE" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Action.Glyph}" Style="{StaticResource Icon}" FontSize="18" Foreground="#E3D7EE" HorizontalAlignment="Center"/>
                                         </Border>
                                         <StackPanel Grid.Column="1" Margin="14,0,16,0" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding Action.Title}" Style="{StaticResource Label}" FontSize="15"/>
@@ -1002,9 +1260,9 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <Border CornerRadius="12" Background="#16162B" Padding="14,12" Margin="0,6,0,0">
+                    <Border CornerRadius="12" Background="#1C1925" Padding="14,12" Margin="0,6,0,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#xE82F;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Text="&#xE82F;" Style="{StaticResource Icon}" Foreground="#CDBBDD" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock Style="{StaticResource Hint}" MaxWidth="700"
                                        Text="Tip: combine a key with Ctrl, Alt or Shift so it doesn't get in the way of typing. F-keys and numpad keys (Num 1, Num Plus...) also work on their own; numpad keys need Num Lock on. While setting a shortcut, Esc cancels and Backspace removes it."/>
                         </StackPanel>

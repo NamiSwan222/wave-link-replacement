@@ -17,6 +17,10 @@ public sealed class AiVoiceSettings
     public bool UseGraphicsCard { get; set; } = true;
     /// <summary>When the AI voice isn't ready or WaveFix is closed, send silence instead of the real voice.</summary>
     public bool SilentWhenUnavailable { get; set; }
+    /// <summary>Quieter than this (dBFS) is treated as silence before conversion.</summary>
+    public double GateDb { get; set; } = -50;
+    /// <summary>Learn the mic's background noise and ignore it (stops babbling in pauses).</summary>
+    public bool AutoGate { get; set; } = true;
 
     public AiVoice? Current => Voices.FirstOrDefault(v => v.Id == Selected) ?? Voices.FirstOrDefault();
 }
@@ -38,6 +42,17 @@ public sealed class AiVoice
     public string Source { get; set; } = "";
     /// <summary>Semitones; voices trained on another gender usually want +/-12.</summary>
     public double Pitch { get; set; }
+    /// <summary>The model's feature index (.index) in the AI voices folder, or null.</summary>
+    public string? IndexFile { get; set; }
+    /// <summary>How strongly the index pulls the voice toward the original speaker (0..1).</summary>
+    public double IndexRate { get; set; } = 0.5;
+    /// <summary>Speakers in the model (0 = unknown, from before this was recorded).</summary>
+    public int Speakers { get; set; }
+    public int SpeakerId { get; set; }
+    /// <summary>0 = the AI voice follows your loudness (RVC's default); 1 = the model's own loudness.</summary>
+    public double LoudnessMix { get; set; }
+    /// <summary>A picture for the voice's tile, in the AI voices folder, or null.</summary>
+    public string? Image { get; set; }
 }
 
 /// <summary>
@@ -98,6 +113,9 @@ public static class RvcModelImport
             Version = version,
             SampleRate = Convert.ToInt32(config[^1]),
             Source = pthPath,
+            // RVC gives every model 109 speaker slots by default, used or not: only a different count
+            // means the model really was trained with several speakers.
+            Speakers = filled["emb_g.weight"].Shape[0] is var n && n != 109 ? (int)n : 1,
         };
         voice.File = Path.Combine(Folder, voice.Id + ".onnx");
         using (var template = Resource(tpl.Key + ".onnx"))
@@ -146,10 +164,53 @@ public static class RvcModelImport
 
     static string Describe(List<object?> cfg) => cfg.Count > 0 ? $"{cfg[^1]} Hz" : "unknown";
 
-    /// <summary>Deletes an imported voice's model file.</summary>
+    /// <summary>Deletes an imported voice's model file (and its index).</summary>
     public static void Delete(AiVoice v)
     {
         try { if (v.File.StartsWith(Folder, StringComparison.OrdinalIgnoreCase)) System.IO.File.Delete(v.File); } catch { }
+        RemoveIndex(v);
+        RemoveImage(v);
+    }
+
+    public static readonly string[] ImageExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp" };
+
+    /// <summary>Copies a picture into the AI voices folder for this voice (replacing any old one).</summary>
+    public static void SetImage(AiVoice v, string imagePath)
+    {
+        var ext = Path.GetExtension(imagePath).ToLowerInvariant();
+        if (!ImageExtensions.Contains(ext)) throw new InvalidDataException("Pick a PNG, JPG, BMP, GIF or WEBP picture.");
+        if (new FileInfo(imagePath).Length > 20_000_000) throw new InvalidDataException("That picture is too big (over 20 MB).");
+        Directory.CreateDirectory(Folder);
+        RemoveImage(v);
+        var dest = Path.Combine(Folder, $"{v.Id}-{Guid.NewGuid().ToString("N")[..6]}{ext}");
+        System.IO.File.Copy(imagePath, dest, overwrite: true);
+        v.Image = dest;
+    }
+
+    public static void RemoveImage(AiVoice v)
+    {
+        try { if (v.Image != null && v.Image.StartsWith(Folder, StringComparison.OrdinalIgnoreCase)) System.IO.File.Delete(v.Image); } catch { }
+        v.Image = null;
+    }
+
+    /// <summary>Checks an .index file and copies it into the AI voices folder for this voice.</summary>
+    public static void AddIndex(AiVoice v, string indexPath)
+    {
+        var idx = RvcIndex.Load(indexPath); // throws with a readable message if it's not usable
+        int dim = v.Version == "v2" ? 768 : 256;
+        if (idx.Dim != dim)
+            throw new InvalidDataException($"This index is for a {(idx.Dim == 768 ? "v2" : idx.Dim == 256 ? "v1" : "different")} model, but {v.Name} is a {v.Version} model.");
+        Directory.CreateDirectory(Folder);
+        var dest = Path.Combine(Folder, v.Id + ".index");
+        System.IO.File.Copy(indexPath, dest + ".tmp", overwrite: true);
+        System.IO.File.Move(dest + ".tmp", dest, overwrite: true);
+        v.IndexFile = dest;
+    }
+
+    public static void RemoveIndex(AiVoice v)
+    {
+        try { if (v.IndexFile != null && v.IndexFile.StartsWith(Folder, StringComparison.OrdinalIgnoreCase)) System.IO.File.Delete(v.IndexFile); } catch { }
+        v.IndexFile = null;
     }
 }
 

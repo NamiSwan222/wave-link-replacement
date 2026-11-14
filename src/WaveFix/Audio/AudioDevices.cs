@@ -66,6 +66,32 @@ public sealed class MicController : Observable, IDisposable
     double _level;
     public double Level { get => _level; private set => Set(ref _level, value); } // 0..1, perceptual
 
+    /// <summary>The mic's Windows input level in dB, with its range (null if unavailable).</summary>
+    public (double Db, double Min, double Max)? LevelDb
+    {
+        get
+        {
+            try
+            {
+                var v = _device!.AudioEndpointVolume;
+                return (v.MasterVolumeLevel, v.VolumeRange.MinDecibels, v.VolumeRange.MaxDecibels);
+            }
+            catch { return null; }
+        }
+    }
+
+    /// <summary>Sets the mic's Windows input level in dB (clamped to its range).</summary>
+    public void SetLevelDb(double db)
+    {
+        try
+        {
+            var v = _device!.AudioEndpointVolume;
+            v.MasterVolumeLevel = (float)Math.Clamp(db, v.VolumeRange.MinDecibels, v.VolumeRange.MaxDecibels);
+            ReadVolume();
+        }
+        catch { }
+    }
+
     public string? DeviceId => _device?.ID;
     public event Action? DeviceChanged;
 
@@ -132,6 +158,26 @@ public sealed class AppChannel : Observable
     bool _updating;
     public string Name { get; }
     public string Initial => Name.Length > 0 ? Name[..1].ToUpperInvariant() : "?";
+
+    System.Windows.Media.ImageSource? _icon;
+    /// <summary>The app's own icon (from its .exe), or null; the tile shows the initial then.</summary>
+    public System.Windows.Media.ImageSource? Icon { get => _icon; private set { if (Set(ref _icon, value)) Raise(nameof(InitialVisibility)); } }
+    public System.Windows.Visibility InitialVisibility => _icon == null ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+    bool _iconTried;
+
+    /// <summary>Loads the icon once, from the first process that has a readable .exe path.</summary>
+    internal void LoadIcon()
+    {
+        if (_iconTried) return;
+        foreach (var pid in Pids)
+        {
+            var path = AppIcons.ExePath(pid);
+            if (path == null) continue;
+            _iconTried = true;
+            Icon = AppIcons.FromExe(path);
+            return;
+        }
+    }
     internal List<uint> Pids { get; } = new();
     internal List<AudioSessionControl> Sessions { get; } = new();
 
@@ -188,6 +234,73 @@ public sealed class AppChannel : Observable
         }
         catch { }
         finally { _updating = false; }
+    }
+}
+
+/// <summary>Reads apps' icons from their .exe files (cached per path).</summary>
+static class AppIcons
+{
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern bool QueryFullProcessImageName(IntPtr h, int flags, System.Text.StringBuilder name, ref int size);
+
+    static readonly Dictionary<string, System.Windows.Media.ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The process's .exe path. Uses the "limited information" right, which works for most
+    /// processes (unlike reading the main module), games and elevated apps included.
+    /// </summary>
+    public static string? ExePath(uint pid)
+    {
+        if (QueryPath(pid) is { } direct) return direct;
+        // Some apps play sound from a service process we can't open (Parsec, for one); another
+        // process of the same app, running as the user, has the same .exe.
+        try
+        {
+            using var p = Process.GetProcessById((int)pid);
+            foreach (var other in Process.GetProcessesByName(p.ProcessName))
+                using (other)
+                    if (other.Id != pid && QueryPath((uint)other.Id) is { } path) return path;
+        }
+        catch { }
+        return null;
+    }
+
+    static string? QueryPath(uint pid)
+    {
+        IntPtr h = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
+        if (h == IntPtr.Zero) return null;
+        try
+        {
+            var sb = new System.Text.StringBuilder(1024);
+            int size = sb.Capacity;
+            return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString(0, size) : null;
+        }
+        finally { CloseHandle(h); }
+    }
+
+    public static System.Windows.Media.ImageSource? FromExe(string path)
+    {
+        if (Cache.TryGetValue(path, out var cached)) return cached;
+        System.Windows.Media.ImageSource? img = null;
+        try
+        {
+            using var icon = System.Drawing.Icon.ExtractAssociatedIcon(path);
+            if (icon != null)
+            {
+                using var big = new System.Drawing.Icon(icon, 64, 64);
+                var src = System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(big.Handle, System.Windows.Int32Rect.Empty,
+                    System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
+                src.Freeze();
+                img = src;
+            }
+        }
+        catch { }
+        Cache[path] = img;
+        return img;
     }
 }
 
@@ -258,6 +371,7 @@ public sealed class AppMixer : IDisposable
             app.Pids.AddRange(pids);
             app.Sessions.Clear();
             app.Sessions.AddRange(sessions);
+            app.LoadIcon();
             app.Sync();
         }
     }
@@ -276,7 +390,14 @@ public sealed class AppMixer : IDisposable
             if (Hidden.Contains(name)) name = null;
             else
             {
-                try { var desc = p.MainModule?.FileVersionInfo.FileDescription; if (!string.IsNullOrWhiteSpace(desc)) name = desc; } catch { }
+                string? desc = null;
+                try { desc = p.MainModule?.FileVersionInfo.FileDescription; }
+                catch
+                {
+                    // A process we can't open (a service): read the description from its .exe.
+                    try { if (AppIcons.ExePath(pid) is { } exe) desc = FileVersionInfo.GetVersionInfo(exe).FileDescription; } catch { }
+                }
+                if (!string.IsNullOrWhiteSpace(desc)) name = desc;
             }
         }
         catch { return null; } // process already gone: don't cache

@@ -384,9 +384,13 @@ public static class WaveFixEngine
     // ---------------- The chain (app side) ----------------
 
     /// <summary>The engine config for the current settings, as JSON (see native/wavefix-engine/src/chain.rs).</summary>
+    /// <summary>While true, the mic gets no effects (auto mic setup measures the raw mic).</summary>
+    public static bool Bypass;
+
     public static string BuildConfig(AppSettings s)
     {
         var stages = new JsonArray();
+        if (Bypass) return new JsonObject { ["stages"] = stages }.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
         void Filter(string kind, double freq, double gain = 0, double? q = null)
         {
             var o = new JsonObject { ["type"] = "filter", ["kind"] = kind, ["freq"] = freq, ["gain"] = gain };

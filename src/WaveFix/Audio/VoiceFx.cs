@@ -33,6 +33,10 @@ public static class VoiceFx
         VerbMix = new("VerbMix", 0, 1), VerbSize = new("VerbSize", 0, 1);
     public static readonly Param LimOn = new("LimOn", 0, 1), LimCeiling = new("LimCeiling", -24, 0);
     public static readonly Param SbOn = new("SbOn", 0, 1), RvcOn = new("RvcOn", 0, 1), RvcMute = new("RvcMute", 0, 1);
+    public static readonly Param Formant = new("Formant", -12, 12), Harmonics = new("Harmonics", -1, 1), Octave = new("Octave", -1, 1),
+        Detune = new("Detune", 0, 1), Breath = new("Breath", 0, 1), Tune = new("Tune", 0, 1), Vocoder = new("Vocoder", 0, 1),
+        Crush = new("Crush", 0, 1), ModType = new("ModType", 0, 3), ModMix = new("ModMix", 0, 1), ModRate = new("ModRate", 0.05, 8),
+        DriveType = new("DriveType", 0, 2), EchoStyle = new("EchoStyle", 0, 3), Radio = new("Radio", 0, 4);
 
     /// <summary>Every parameter in the plugin's order (used to check the plugin matches this table).</summary>
     public static readonly Param[] All =
@@ -41,6 +45,7 @@ public static class VoiceFx
         CompOn, CompThresh, CompRatio, CompAttack, CompRelease, CompMakeup,
         VoiceOn, Pitch, RobotMix, RobotFreq, Wobble, WobbleRate, Drive, LowCut, HighCut,
         EchoMix, EchoTime, EchoFeedback, VerbMix, VerbSize, LimOn, LimCeiling, SbOn, RvcOn, RvcMute,
+        Formant, Harmonics, Octave, Detune, Breath, Tune, Vocoder, Crush, ModType, ModMix, ModRate, DriveType, EchoStyle, Radio,
     };
 
     sealed class Builder
@@ -100,7 +105,11 @@ public static class VoiceFx
              .Set(Wobble, voice.Wobble / 100).Set(WobbleRate, voice.WobbleRate).Set(Drive, voice.Grit / 100)
              .Set(LowCut, voice.LowCut).Set(HighCut, voice.HighCut)
              .Set(EchoMix, voice.Echo / 100).Set(EchoTime, voice.EchoTime).Set(EchoFeedback, voice.EchoFeedback)
-             .Set(VerbMix, voice.Room / 100).Set(VerbSize, voice.RoomSize);
+             .Set(VerbMix, voice.Room / 100).Set(VerbSize, voice.RoomSize)
+             .Set(Formant, voice.Formant).Set(Harmonics, voice.Harmonics / 100).Set(Octave, voice.Octave / 100)
+             .Set(Detune, voice.Detune / 100).Set(Breath, voice.Breath / 100).Set(Tune, voice.Tune / 100).Set(Vocoder, voice.Vocoder / 100)
+             .Set(Crush, voice.Crush / 100).Set(ModType, voice.ModType).Set(ModMix, voice.ModMix / 100).Set(ModRate, voice.ModRate)
+             .Set(DriveType, voice.DriveType).Set(EchoStyle, voice.EchoStyle).Set(Radio, voice.Radio);
         }
         return any ? b.Map : null;
     }
@@ -191,9 +200,33 @@ public sealed class VoiceSettings
     public double EchoFeedback { get; set; } = 0.35;
     public double RoomSize { get; set; } = 0.5;
 
+    // ---- Voice shape (semitones, or -100..100 / 0..100 %) ----
+    public double Formant { get; set; }
+    public double Harmonics { get; set; }
+    public double Octave { get; set; }
+    public double Detune { get; set; }
+    public double Breath { get; set; }
+    public double Tune { get; set; }
+    public double Vocoder { get; set; }
+    // ---- Effects ----
+    public double Crush { get; set; }
+    /// <summary>0 off, 1 chorus, 2 flanger, 3 phaser.</summary>
+    public int ModType { get; set; }
+    public double ModMix { get; set; } = 60;
+    public double ModRate { get; set; } = 0.5;
+    /// <summary>0 overdrive, 1 fuzz, 2 megaphone.</summary>
+    public int DriveType { get; set; }
+    /// <summary>0 echo, 1 slapback, 2 canyon, 3 rhythm.</summary>
+    public int EchoStyle { get; set; }
+    /// <summary>0 off, 1 old phone, 2 walkie-talkie, 3 police radio, 4 AM radio.</summary>
+    public int Radio { get; set; }
+
     /// <summary>True when the settings wouldn't change the sound at all.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public bool IsNeutral =>
-        Math.Abs(Pitch) < 0.01 && Robot < 0.5 && Wobble < 0.5 && Grit < 0.5 && Echo < 0.5 && Room < 0.5 && LowCut <= 25 && HighCut >= 19500;
+        Math.Abs(Pitch) < 0.01 && Robot < 0.5 && Wobble < 0.5 && Grit < 0.5 && Echo < 0.5 && Room < 0.5 && LowCut <= 25 && HighCut >= 19500
+        && Math.Abs(Formant) < 0.01 && Math.Abs(Harmonics) < 0.5 && Math.Abs(Octave) < 0.5 && Detune < 0.5 && Breath < 0.5
+        && Tune < 0.5 && Vocoder < 0.5 && Crush < 0.5 && (ModType == 0 || ModMix < 0.5) && Radio == 0;
 
     public void CopyFrom(VoicePreset p)
     {
@@ -201,28 +234,52 @@ public sealed class VoiceSettings
         Pitch = p.Pitch; Robot = p.Robot; Wobble = p.Wobble; Grit = p.Grit; Echo = p.Echo; Room = p.Room;
         RobotFreq = p.RobotFreq; WobbleRate = p.WobbleRate; LowCut = p.LowCut; HighCut = p.HighCut;
         EchoTime = p.EchoTime; EchoFeedback = p.EchoFeedback; RoomSize = p.RoomSize;
+        Formant = p.Formant; Harmonics = p.Harmonics; Octave = p.Octave; Detune = p.Detune; Breath = p.Breath;
+        Tune = p.Tune; Vocoder = p.Vocoder; Crush = p.Crush; ModType = p.ModType; ModMix = p.ModMix; ModRate = p.ModRate;
+        DriveType = p.DriveType; EchoStyle = p.EchoStyle; Radio = p.Radio;
     }
 }
 
 public sealed record VoicePreset(string Id, string Label, string Desc,
     double Pitch = 0, double Robot = 0, double Wobble = 0, double Grit = 0, double Echo = 0, double Room = 0,
     double RobotFreq = 80, double WobbleRate = 5, double LowCut = 20, double HighCut = 20000,
-    double EchoTime = 250, double EchoFeedback = 0.35, double RoomSize = 0.5)
+    double EchoTime = 250, double EchoFeedback = 0.35, double RoomSize = 0.5,
+    double Formant = 0, double Harmonics = 0, double Octave = 0, double Detune = 0, double Breath = 0,
+    double Tune = 0, double Vocoder = 0, double Crush = 0, int ModType = 0, double ModMix = 60, double ModRate = 0.5,
+    int DriveType = 0, int EchoStyle = 0, int Radio = 0)
 {
     public const string CustomId = "custom";
 
     public static readonly VoicePreset[] All =
     {
-        new("deep", "Deep", "Lower and bigger", Pitch: -4),
-        new("giant", "Giant", "Huge and rumbly", Pitch: -9, Grit: 20, Room: 25, RoomSize: 0.8),
-        new("chipmunk", "Chipmunk", "Tiny and squeaky", Pitch: 9),
+        new("deep", "Deep", "Lower and bigger", Pitch: -3, Formant: -3),
+        new("giant", "Giant", "Huge and rumbly", Pitch: -6, Formant: -7, Octave: -35, Grit: 15, Room: 25, RoomSize: 0.8),
+        new("chipmunk", "Chipmunk", "Tiny and squeaky", Pitch: 9, Formant: 7),
+        new("kid", "Little kid", "Small and young", Pitch: 5, Formant: 5),
+        new("swap-up", "Lighter voice", "Higher, smaller voice", Pitch: 6, Formant: 4),
+        new("swap-down", "Deeper voice", "Lower, bigger voice", Pitch: -6, Formant: -4),
+        new("monster", "Monster", "Growling beast", Pitch: -5, Formant: -9, Octave: -60, Harmonics: -30, Grit: 35, DriveType: 1, Room: 30, RoomSize: 0.7),
+        new("whisper", "Whisper", "Breathy and close", Breath: 85, Harmonics: 30, Formant: 1),
         new("robot", "Robot", "Metallic machine", Robot: 85, RobotFreq: 70, Echo: 35, EchoTime: 22, EchoFeedback: 0.55),
-        new("alien", "Alien", "Warbly visitor", Pitch: 5, Robot: 45, RobotFreq: 330, Wobble: 45, WobbleRate: 7),
-        new("phone", "Phone call", "Tinny line", Grit: 25, LowCut: 400, HighCut: 3200),
-        new("megaphone", "Megaphone", "Loud and crunchy", Grit: 65, LowCut: 700, HighCut: 4200),
+        new("autotune", "Auto-tune", "Snaps to notes", Tune: 100),
+        new("synth", "Synth singer", "Vocoder chord", Vocoder: 100, Tune: 60, Echo: 20, EchoTime: 180, EchoFeedback: 0.3),
+        new("android", "Android", "Robotic, in tune", Tune: 100, Vocoder: 45, Robot: 25, RobotFreq: 120, ModType: 2, ModMix: 30, ModRate: 0.3),
+        new("alien", "Alien", "Warbly visitor", Pitch: 5, Formant: 3, Detune: 70, Robot: 30, RobotFreq: 330, Wobble: 40, WobbleRate: 7),
+        new("bell", "Bell spirit", "Ringing and strange", Detune: 100, Harmonics: 50, Room: 40, RoomSize: 0.9),
+        new("twins", "Twins", "Two of you", Octave: 45, ModType: 1, ModMix: 60, ModRate: 0.8),
+        new("phone", "Old phone", "Tinny line", Radio: 1),
+        new("walkie", "Walkie-talkie", "Squelch and hiss", Radio: 2),
+        new("police", "Police radio", "Crackly dispatch", Radio: 3, Echo: 15, EchoStyle: 1),
+        new("amradio", "Old radio", "Warm and hummy", Radio: 4),
+        new("megaphone", "Megaphone", "Loud and crunchy", Grit: 55, DriveType: 2, Echo: 20, EchoStyle: 1),
+        new("retro", "Retro console", "8-bit crunch", Crush: 70, Pitch: 2),
+        new("jet", "Jet", "Swooshing flanger", ModType: 2, ModMix: 85, ModRate: 0.25),
+        new("dream", "Dreamy", "Soft and floaty", ModType: 1, ModMix: 70, ModRate: 0.6, Room: 45, RoomSize: 0.9, Breath: 25),
+        new("space", "Space station", "Phaser and echo", ModType: 3, ModMix: 70, ModRate: 0.4, Echo: 30, EchoStyle: 3, EchoTime: 220, Room: 25),
         new("cave", "Cave", "Big echoey space", Echo: 35, EchoTime: 280, EchoFeedback: 0.45, Room: 45, RoomSize: 0.95),
+        new("canyon", "Canyon", "Shout across a valley", Echo: 45, EchoStyle: 2, EchoTime: 320, EchoFeedback: 0.4),
         new("underwater", "Underwater", "Muffled bubbles", Wobble: 80, WobbleRate: 1.8, HighCut: 800, Room: 25, RoomSize: 0.5),
-        new("ghost", "Ghost", "Spooky and airy", Pitch: -3, Wobble: 30, WobbleRate: 3, Echo: 25, EchoTime: 380, EchoFeedback: 0.5, Room: 60, RoomSize: 1),
+        new("ghost", "Ghost", "Spooky and airy", Pitch: -2, Formant: 2, Breath: 45, Wobble: 25, WobbleRate: 3, Echo: 25, EchoTime: 380, EchoFeedback: 0.5, Room: 60, RoomSize: 1),
     };
 
     public static VoicePreset? Find(string id) => All.FirstOrDefault(p => p.Id == id);

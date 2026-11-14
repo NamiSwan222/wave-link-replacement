@@ -163,6 +163,8 @@ public partial class MainWindow : Window
     void UpdateMuteLabel()
     {
         MuteLabel.Text = Mic.Muted ? "Muted, click to unmute" : "Mic is on, click to mute";
+        SideMicText.Text = Mic.Muted ? "Muted" : "Mic on";
+        SideMuteIcon.Text = Mic.Muted ? "\uE74F" : "\uE720";
         MuteIcon.Text = Mic.Muted ? "" : "";
     }
 
@@ -1097,7 +1099,7 @@ public static class Osd
                 ResizeMode = ResizeMode.NoResize, Focusable = false,
                 Content = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromArgb(0xF2, 0x1B, 0x1B, 0x30)),
+                    Background = new SolidColorBrush(Color.FromArgb(0xF2, 0x18, 0x16, 0x21)),
                     BorderBrush = (Brush)owner.FindResource("Border"), BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(16), Padding = new Thickness(20, 14, 22, 14),
                     Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { _icon, _text } },

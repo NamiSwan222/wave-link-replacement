@@ -66,9 +66,15 @@ device still uses it). Your settings carry over.
   voice tone presets (Flat, Warm, Clear, Broadcast, Radio) and a Custom 5-band EQ
 - **Voice polish:** leveler (compressor), de-esser, background silencer (downward expander) and
   peak protection (limiter, the very last effect, after mic boost)
-- **Voice changer:** 10 voices (Deep, Giant, Chipmunk, Robot, Alien, Phone call, Megaphone, Cave,
-  Underwater, Ghost) or a Custom mix of pitch, robot, wobble, grit, echo and room. Pitch shifting
-  adds about 40 ms of delay
+- **Voice changer:** 28 voices in groups (size and age, characters, robots and music, radio and
+  phone, spaces) or a Custom mix. The voice engine (`native/wavefix-fx/src/voice.rs`) is an STFT
+  phase vocoder with peak-locked pitch shifting (Laroche & Dolson) and a cepstral spectral
+  envelope, so pitch and **formant** move separately; it also does harmonics tilt, an octave
+  layer, detune (inharmonic stretch), breath, auto-tune (YIN pitch detection, snap to the nearest
+  semitone) and a vocoder (chord carrier on the detected note), about 21 ms of delay. Time-domain
+  effects: ring mod, wobble, distortion (overdrive, fuzz, megaphone), bitcrusher, chorus/flanger/
+  phaser, radio (old phone, walkie-talkie with squelch, police radio, AM radio), echo (classic,
+  slapback, canyon, rhythm) and room
 - **AI voices:** load [RVC](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI)
   voice models (`.pth`, or a `.zip` with one inside; v1/v2 at 32, 40 or 48 kHz) and talk in that
   voice, with a pitch control per voice. Everything runs locally with ONNX Runtime (DirectML on the
@@ -77,6 +83,12 @@ device still uses it). Your settings carry over.
   ContentVec features, RMVPE pitch, SOLA crossfades) and writes it back for the engine to play a
   fixed delay later (about 0.35 s on a graphics card). If the app stops, the engine fades back to
   the real voice, or to silence if "Never send my real voice" is on.
+  - Pauses stay silent: an adaptive gate tracks the mic's noise floor and mutes the converted
+    output between words (RVC otherwise babbles on noise). The block size and delay are picked
+    automatically from measured conversion time and adjusted while you talk.
+  - Advanced: silence threshold, loudness mix, FAISS index file (`.index`, read by
+    `src/WaveFix/Rvc/RvcIndex.cs`, IVF-Flat) and strength, speaker ID; a picture per voice.
+  - **Find voices online** searches Hugging Face for RVC models and installs one with its index
   - A `.pth` is read without running anything from it (a data-only pickle reader,
     `src/WaveFix/Rvc/PthReader.cs`) and its weights are written into an ONNX template of the
     matching RVC model type (`src/WaveFix/Rvc/Templates`, made by `tools/rvc/make_templates.py`).
@@ -90,7 +102,13 @@ device still uses it). Your settings carry over.
   access); it never plays the sound into the mic from an app, so nothing leaks into Discord streams
 - **WaveFix Voice FX:** voice polish, the voice changer, the soundboard mixer and peak protection
   (`native/wavefix-fx`, Rust), built into the engine. It's also a VST2 plugin, so other hosts can load it
-- **App mixer:** volume, mute and output device for each app playing sound
+- **App mixer:** volume, mute and output device for each app playing sound, with each app's icon
+- **Hear myself:** monitors the processed mic (after every effect and the AI voice) on your output
+  device with a capped backlog
+- **Set up my mic for me:** records a few seconds of quiet and of speech with the engine bypassed,
+  then suggests input level, boost, noise removal, rumble filter, leveler and tone
+- **Find sounds online** for the soundboard via [Openverse](https://openverse.org) (openly licensed
+  audio), keeping each sound's creator and license
 - **Plugins:** add your own 64-bit VST2 effects to the mic chain, or **scan** the usual VST
   folders (and any folder you pick) for them; turn on/off, reorder, remove. They're copied to
   `C:\Program Files\WaveFix\Plugins` (one Windows permission prompt), the only place the engine
@@ -104,8 +122,9 @@ device still uses it). Your settings carry over.
   on/off, mic boost up/down, next voice tone, voice changer on/off, next voice, stop all sounds,
   a key per soundboard sound, open WaveFix, with
   an on-screen confirmation. F-keys and numpad keys can be used on their own
-- Friendly dark UI (palette and type from the UI/UX Pro Max "podcast / music streaming"
-  profile, [Plus Jakarta Sans](https://github.com/tokotype/PlusJakartaSans) under the OFL),
+- Dark UI (palette from TypeUI's "Dark" design skill;
+  [Inter](https://github.com/rsms/inter) and [IBM Plex Serif](https://github.com/IBM/plex), both
+  under the OFL), grouped sidebar with a quick mute and level,
   keyboard focus rings, screen-reader names, per-monitor DPI
 - Tray icon (left click opens, right click for mute and quit), optional start with Windows
 - Warns when Wave Link is running or when the effects aren't attached to the mic correctly

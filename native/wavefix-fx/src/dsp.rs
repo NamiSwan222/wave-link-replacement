@@ -3,6 +3,7 @@
 
 use crate::bridge;
 use crate::params::{self as p, COUNT, PARAMS};
+use crate::voice::{Shape, SpectralVoice};
 use std::f32::consts::PI;
 
 const MAX_RATE: f32 = 192_000.0;
@@ -16,6 +17,8 @@ fn coef(ms: f32, sr: f32) -> f32 { (-1.0 / (ms.max(0.01) * 0.001 * sr)).exp() }
 struct Biquad { b0: f32, b1: f32, b2: f32, a1: f32, a2: f32, z1: f32, z2: f32 }
 
 impl Biquad {
+    /// Unity filter (passes everything).
+    fn bypass(&mut self) { self.b0 = 1.0; self.b1 = 0.0; self.b2 = 0.0; self.a1 = 0.0; self.a2 = 0.0; }
     fn set(&mut self, sr: f32, f: f32, q: f32, high: bool) {
         let w = 2.0 * PI * (f / sr).clamp(1e-5, 0.49);
         let (s, c) = w.sin_cos();
@@ -95,102 +98,6 @@ impl Allpass {
     }
 }
 
-/// Pitch shifting with two crossfading read heads on a delay line. Each time a head starts a
-/// new grain, its start point is moved by up to one voice period so it lines up with the other
-/// head (highest correlation). That keeps the crossfade in phase: no warbly cancellation.
-struct PitchShifter {
-    buf: Delay,
-    /// Delay of each head in samples, and where it is in its grain (0..1).
-    d: [f32; 2],
-    phase: [f32; 2],
-    ratio: f32,
-    /// Grain sweep length, alignment search span and compare length, in samples.
-    range: f32,
-    search: usize,
-    compare: usize,
-    step: usize,
-}
-
-impl PitchShifter {
-    fn new() -> Self {
-        PitchShifter {
-            buf: Delay::new((0.09 * MAX_RATE) as usize),
-            d: [0.0; 2], phase: [0.0, 0.5], ratio: 1.0,
-            range: 1920.0, search: 576, compare: 384, step: 1,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.buf.clear();
-        self.ratio = 0.0; // forces prepare() to place the heads again
-    }
-
-    fn start(&self, up: bool) -> f32 { if up { 2.0 + self.range } else { 2.0 } }
-
-    fn prepare(&mut self, sr: f32, ratio: f32) {
-        self.range = 0.04 * sr;
-        self.search = (0.012 * sr) as usize;
-        self.compare = (0.008 * sr) as usize;
-        self.step = ((sr / 48_000.0) as usize).max(1);
-        if (ratio - self.ratio).abs() < 1e-6 { return; }
-        let first = self.ratio == 0.0 || (self.ratio > 1.0) != (ratio > 1.0);
-        self.ratio = ratio;
-        if first {
-            // Head 0 starts a grain, head 1 is halfway through its own.
-            let up = ratio > 1.0;
-            let sweep = (1.0 - ratio) * self.grain_len();
-            self.phase = [0.0, 0.5];
-            self.d = [self.start(up), self.start(up) + 0.5 * sweep];
-        }
-    }
-
-    /// Samples per grain: the time a head takes to sweep `range` at this pitch ratio.
-    fn grain_len(&self) -> f32 { (self.range / (self.ratio - 1.0).abs().max(1e-3)).min(48_000.0 * 4.0) }
-
-    #[inline]
-    fn run(&mut self, x: f32) -> f32 {
-        self.buf.push(x);
-        let len = self.grain_len();
-        let rate = 1.0 - self.ratio; // change of delay per sample
-        let up = self.ratio > 1.0;
-        let mut out = 0.0;
-        for h in 0..2 {
-            self.d[h] += rate;
-            self.phase[h] += 1.0 / len;
-            if self.phase[h] >= 1.0 {
-                self.phase[h] -= 1.0;
-                self.d[h] = self.aligned_start(up, self.d[1 - h]);
-            }
-            let g = (PI * self.phase[h]).sin();
-            out += self.buf.read(self.d[h]) * g * g;
-        }
-        out
-    }
-
-    /// The grain start (within one search span) that best matches what the other head plays now.
-    fn aligned_start(&self, up: bool, other: f32) -> f32 {
-        let base = self.start(up);
-        let other = other.max(1.0) as usize;
-        let mut best = (f32::MIN, 0usize);
-        let mut k = 0;
-        while k <= self.search {
-            let cand = base as usize + k;
-            let (mut num, mut energy) = (0.0f32, 1e-9f32);
-            let mut j = 0;
-            while j < self.compare {
-                let a = self.buf.read_int(cand + j);
-                num += a * self.buf.read_int(other + j);
-                energy += a * a;
-                j += self.step;
-            }
-            let score = num / energy.sqrt();
-            if score > best.0 { best = (score, k); }
-            k += self.step;
-        }
-        base + best.1 as f32
-    }
-}
-
 const COMB_LENS: [f32; 4] = [1116.0, 1188.0, 1277.0, 1356.0];
 const ALLPASS_LENS: [f32; 2] = [556.0, 441.0];
 /// Brings the reverb's wet signal to about the loudness of the dry voice.
@@ -220,7 +127,26 @@ pub struct Dsp {
     de_gain: f32,
     // Compressor (gain reduction in dB)
     comp_gr: f32,
-    pitch: PitchShifter,
+    // Voice engine: pitch, formant, harmonics, octave, detune, breath, auto-tune, vocoder
+    voice: SpectralVoice,
+    // Bitcrusher
+    crush_count: f32,
+    crush_val: f32,
+    // Modulation: chorus/flanger delay, phaser all-pass stages
+    mod_delay: Delay,
+    mod_phase: f32,
+    mod_last: f32,
+    ph_x1: [f32; 6],
+    ph_y1: [f32; 6],
+    // Megaphone band
+    drive_bp: [Biquad; 4],
+    // Radio / telephone
+    radio_f: [Biquad; 8],
+    radio_env: f32,
+    radio_talk: usize,
+    radio_squelch: usize,
+    radio_hum: f32,
+    rng: u32,
     // Wobble (vibrato)
     wob: Delay,
     wob_phase: f32,
@@ -251,13 +177,21 @@ impl Dsp {
             exp_env: 0.0, exp_gain: 1.0,
             de_lp: [Biquad::default(); 2], de_hp: [Biquad::default(); 2], de_env: 0.0, de_gain: 1.0,
             comp_gr: 0.0,
-            pitch: PitchShifter::new(),
+            voice: SpectralVoice::new(),
+            crush_count: 0.0, crush_val: 0.0,
+            mod_delay: Delay::new((0.03 * MAX_RATE) as usize),
+            mod_phase: 0.0, mod_last: 0.0, ph_x1: [0.0; 6], ph_y1: [0.0; 6],
+            drive_bp: [Biquad::default(); 4],
+            radio_f: [Biquad::default(); 8],
+            radio_env: 0.0, radio_talk: 0, radio_squelch: 0, radio_hum: 0.0,
+            rng: 0x9E37_79B9,
             wob: Delay::new((0.008 * MAX_RATE) as usize),
             wob_phase: 0.0,
             robot_phase: 0.0,
             low_cut: [Biquad::default(); 2],
             high_cut: [Biquad::default(); 2],
-            echo: Delay::new((1.05 * MAX_RATE) as usize),
+            // Long enough for the canyon echo's last tap (2.6x the longest echo time).
+            echo: Delay::new((2.7 * MAX_RATE) as usize),
             echo_lp: 0.0,
             combs: [Comb::new(), Comb::new(), Comb::new(), Comb::new()],
             allpasses: [Allpass::new(), Allpass::new()],
@@ -280,6 +214,7 @@ impl Dsp {
             a.len = ((base * scale) as usize).clamp(1, a.buf.len());
             a.i = 0;
         }
+        self.voice.set_sample_rate(self.sr);
         self.last = None; // recompute filters
     }
 
@@ -289,7 +224,12 @@ impl Dsp {
         for f in self.de_lp.iter_mut().chain(self.de_hp.iter_mut()) { f.reset(); }
         self.de_env = 0.0; self.de_gain = 1.0;
         self.comp_gr = 0.0;
-        self.pitch.reset();
+        self.voice.reset();
+        self.crush_count = 0.0; self.crush_val = 0.0;
+        self.mod_delay.clear(); self.mod_phase = 0.0; self.mod_last = 0.0;
+        self.ph_x1 = [0.0; 6]; self.ph_y1 = [0.0; 6];
+        for f in self.drive_bp.iter_mut().chain(self.radio_f.iter_mut()) { f.reset(); }
+        self.radio_env = 0.0; self.radio_talk = 0; self.radio_squelch = 0; self.radio_hum = 0.0;
         self.wob.clear(); self.wob_phase = 0.0;
         self.robot_phase = 0.0;
         for f in self.low_cut.iter_mut().chain(self.high_cut.iter_mut()) { f.reset(); }
@@ -340,10 +280,26 @@ impl Dsp {
         const KNEE: f32 = 6.0;
 
         let voice = s.on(p::VOICE_ON);
-        let semis = s.v(p::PITCH);
-        let shift = voice && semis.abs() > 0.01;
-        let ratio = 2f32.powf(semis / 12.0);
-        if shift { self.pitch.prepare(sr, ratio); }
+        let shape = Shape {
+            pitch: s.v(p::PITCH), formant: s.v(p::FORMANT), harmonics: s.v(p::HARMONICS), octave: s.v(p::OCTAVE),
+            detune: s.v(p::DETUNE), breath: s.v(p::BREATH), tune: s.v(p::TUNE), vocoder: s.v(p::VOCODER),
+        };
+        let spectral = voice && shape.active();
+
+        let crush = if voice { s.v(p::CRUSH) } else { 0.0 };
+        let crush_hold = 1.0 + crush * crush * 20.0 * (sr / 48_000.0);
+        let crush_step = 2.0 / 2f32.powf(16.0 - crush * 12.0);
+
+        let mod_type = if voice { s.v(p::MOD_TYPE).round() as u32 } else { 0 };
+        let mod_mix = s.v(p::MOD_MIX);
+        let modulate = mod_type > 0 && mod_mix > 0.001;
+        let mod_step = 2.0 * PI * s.v(p::MOD_RATE) / sr;
+
+        let drive_type = s.v(p::DRIVE_TYPE).round() as u32;
+        let radio = if voice { s.v(p::RADIO).round() as u32 } else { 0 };
+        let (radio_att, radio_rel) = (coef(2.0, sr), coef(40.0, sr));
+        let radio_hum_step = 2.0 * PI * 60.0 / sr;
+        let echo_style = s.v(p::ECHO_STYLE).round() as u32;
 
         let robot_mix = if voice { s.v(p::ROBOT_MIX) } else { 0.0 };
         let robot_step = 2.0 * PI * s.v(p::ROBOT_FREQ) / sr;
@@ -361,7 +317,9 @@ impl Dsp {
         let high_cut = voice && s.v(p::HIGH_CUT) < 19_500.0;
 
         let echo_mix = if voice { s.v(p::ECHO_MIX) } else { 0.0 };
-        let echo_d = ((s.v(p::ECHO_TIME) * 0.001 * sr) as usize).clamp(1, self.echo.mask - 1);
+        let echo_d = ((s.v(p::ECHO_TIME) * 0.001 * sr) as usize).clamp(2, (self.echo.mask - 2) / 3);
+        // Slapback: one short repeat (70-140 ms), whatever the echo time.
+        let slap_d = ((s.v(p::ECHO_TIME).clamp(70.0, 140.0) * 0.001 * sr) as usize).max(2);
         let echo_fb = s.v(p::ECHO_FEEDBACK).clamp(0.0, 0.95);
 
         let verb_mix = if voice { s.v(p::VERB_MIX) } else { 0.0 };
@@ -430,7 +388,7 @@ impl Dsp {
         for x in buf.iter_mut() {
             let mut y = *x;
             if voice {
-                if shift { y = self.pitch.run(y); }
+                if spectral { y = self.voice.run(y, &shape); }
                 if wobble > 0.001 {
                     self.wob.push(y);
                     self.wob_phase += wob_step;
@@ -443,16 +401,126 @@ impl Dsp {
                     // Ring modulation; 1.4 keeps the loudness about the same.
                     y = y * (1.0 - robot_mix) + y * self.robot_phase.sin() * 1.4 * robot_mix;
                 }
+                if crush > 0.001 {
+                    // Sample-and-hold (lower sample rate) and fewer bits.
+                    self.crush_count += 1.0;
+                    if self.crush_count >= crush_hold {
+                        self.crush_count -= crush_hold;
+                        self.crush_val = (y / crush_step).round() * crush_step;
+                    }
+                    y = self.crush_val;
+                }
                 if drive > 0.001 {
-                    y = (y * pre).tanh() * post;
+                    y = match drive_type {
+                        // Fuzz: hard, slightly lopsided clipping.
+                        1 => (y * (1.0 + drive * 60.0)).clamp(-0.8, 1.0) * 0.45,
+                        // Megaphone: a narrow horn band, then saturation.
+                        2 => {
+                            let mut b = self.drive_bp[0].run(y);
+                            b = self.drive_bp[1].run(b);
+                            b = (b * pre * 1.5).tanh() * post * 1.6;
+                            // The horn itself: the band again after the distortion.
+                            b = self.drive_bp[2].run(b);
+                            self.drive_bp[3].run(b)
+                        }
+                        // Overdrive: smooth tube-like saturation.
+                        _ => (y * pre).tanh() * post,
+                    };
+                }
+                if radio > 0 {
+                    // Speech detector for the squelch burst at the end of a sentence.
+                    let a = y.abs();
+                    let c = if a > self.radio_env { radio_att } else { radio_rel };
+                    self.radio_env = a + c * (self.radio_env - a);
+                    let talking = self.radio_env > 0.01;
+                    if talking { self.radio_talk += 1; }
+                    else if self.radio_talk > (0.25 * sr) as usize {
+                        if radio == 2 || radio == 3 { self.radio_squelch = (0.12 * sr) as usize; }
+                        self.radio_talk = 0;
+                    } else { self.radio_talk = 0; }
+                    let mut b = y;
+                    for f in &mut self.radio_f[..4] { b = f.run(b); }
+                    let (sat, level, hiss) = match radio {
+                        1 => (2.0, 0.7, 0.0015),   // old phone: light grit, faint line noise
+                        2 => (6.0, 0.35, 0.006),   // walkie-talkie: crushed, hissy
+                        3 => (4.0, 0.45, 0.009),   // police radio: gritty, crackly
+                        _ => (1.5, 0.8, 0.003),    // AM radio: warm, with hum
+                    };
+                    b = (b * sat).tanh() * level;
+                    // The small speaker: the band again after the distortion.
+                    for f in &mut self.radio_f[4..] { b = f.run(b); }
+                    let noise = self.noise();
+                    if talking { b += noise * hiss; }
+                    if radio == 3 && self.noise() > 0.998 { b += 0.06 * self.noise(); } // crackle
+                    if radio == 4 {
+                        self.radio_hum += radio_hum_step;
+                        if self.radio_hum > 2.0 * PI { self.radio_hum -= 2.0 * PI; }
+                        b += 0.004 * self.radio_hum.sin() + noise * 0.002;
+                    }
+                    if self.radio_squelch > 0 {
+                        self.radio_squelch -= 1;
+                        b += noise * 0.08;
+                    }
+                    y = b;
                 }
                 if low_cut { for f in &mut self.low_cut { y = f.run(y); } }
                 if high_cut { for f in &mut self.high_cut { y = f.run(y); } }
+                if modulate {
+                    self.mod_phase += mod_step;
+                    if self.mod_phase > 2.0 * PI { self.mod_phase -= 2.0 * PI; }
+                    let lfo = 0.5 + 0.5 * self.mod_phase.sin();
+                    let wet = match mod_type {
+                        // Chorus: a second voice slightly late and drifting.
+                        1 => { self.mod_delay.push(y); self.mod_delay.read((0.012 + 0.008 * lfo) * sr) }
+                        // Flanger: very short swept delay with feedback (jet sweep).
+                        2 => {
+                            let d = self.mod_delay.read((0.0008 + 0.004 * lfo) * sr);
+                            self.mod_delay.push(y + 0.6 * d);
+                            d
+                        }
+                        // Phaser: six swept all-pass stages with feedback.
+                        _ => {
+                            let f = 300.0 * (2500.0f32 / 300.0).powf(lfo);
+                            let t = (PI * f / sr).tan();
+                            let a = (t - 1.0) / (t + 1.0);
+                            let mut v = y + 0.5 * self.mod_last;
+                            for k in 0..6 {
+                                let out = a * v + self.ph_x1[k] - a * self.ph_y1[k];
+                                self.ph_x1[k] = v; self.ph_y1[k] = out;
+                                v = out;
+                            }
+                            self.mod_last = v;
+                            v
+                        }
+                    };
+                    y = y * (1.0 - 0.5 * mod_mix) + wet * 0.7 * mod_mix;
+                }
                 if echo_mix > 0.001 {
-                    // Read the echo before writing this sample so a delay of N means N samples.
-                    let e = self.echo.read_int(echo_d - 1);
-                    self.echo_lp += 0.45 * (e - self.echo_lp);
-                    self.echo.push(y + echo_fb * self.echo_lp);
+                    let e = match echo_style {
+                        // Slapback: a single quick repeat, no feedback.
+                        1 => { let e = self.echo.read_int(slap_d - 1); self.echo.push(y); e }
+                        // Canyon: three spreading repeats that keep echoing, getting darker.
+                        2 => {
+                            let e = self.echo.read_int(echo_d - 1) + 0.6 * self.echo.read_int(echo_d * 17 / 10) + 0.35 * self.echo.read_int(echo_d * 26 / 10);
+                            self.echo_lp += 0.2 * (e - self.echo_lp);
+                            self.echo.push(y + echo_fb * 0.6 * self.echo_lp);
+                            e * 0.8
+                        }
+                        // Rhythm: three evenly spaced repeats.
+                        3 => {
+                            let e = 0.8 * self.echo.read_int(echo_d - 1) + 0.55 * self.echo.read_int(2 * echo_d - 1) + 0.35 * self.echo.read_int(3 * echo_d - 1);
+                            self.echo.push(y);
+                            e
+                        }
+                        // Classic: one repeat that feeds back.
+                        _ => {
+                            // Read the echo before writing this sample so a delay of N means N samples.
+                            let e = self.echo.read_int(echo_d - 1);
+                            self.echo_lp += 0.45 * (e - self.echo_lp);
+                            self.echo.push(y + echo_fb * self.echo_lp);
+                            e
+                        }
+                    };
                     y += echo_mix * e;
                 }
                 if verb_mix > 0.001 {
@@ -488,6 +556,9 @@ impl Dsp {
 
         // Keep feedback state free of denormals between blocks.
         flush(&mut self.echo_lp);
+        flush(&mut self.mod_last);
+        flush(&mut self.radio_env);
+        for v in self.ph_x1.iter_mut().chain(self.ph_y1.iter_mut()) { flush(v); }
         flush(&mut self.de_env);
         flush(&mut self.exp_env);
         for c in &mut self.combs { flush(&mut c.filt); }
@@ -500,6 +571,34 @@ impl Dsp {
         // Two Butterworth-ish stages each: steep enough for a phone or megaphone sound.
         for f in &mut self.low_cut { f.set(sr, s.v(p::LOW_CUT), 0.707, true); }
         for f in &mut self.high_cut { f.set(sr, s.v(p::HIGH_CUT), 0.707, false); }
+        // Megaphone horn band.
+        self.drive_bp[0].set(sr, 550.0, 0.8, true);
+        self.drive_bp[1].set(sr, 3200.0, 0.8, false);
+        self.drive_bp[2].set(sr, 550.0, 0.8, true);
+        self.drive_bp[3].set(sr, 3200.0, 0.8, false);
+        // Radio / telephone bands.
+        let (lo, hi) = match s.v(p::RADIO).round() as u32 {
+            1 => (300.0, 3400.0),
+            2 => (500.0, 2800.0),
+            3 => (400.0, 3000.0),
+            4 => (200.0, 4500.0),
+            _ => (0.0, 0.0),
+        };
+        if lo > 0.0 {
+            for k in [0, 1, 4, 5] { self.radio_f[k].set(sr, lo, 0.707, true); }
+            for k in [2, 3, 6, 7] { self.radio_f[k].set(sr, hi, 0.707, false); }
+        } else {
+            for f in &mut self.radio_f { f.bypass(); }
+        }
+    }
+
+    /// White noise in -1..1 (xorshift).
+    #[inline]
+    fn noise(&mut self) -> f32 {
+        let mut r = self.rng;
+        r ^= r << 13; r ^= r >> 17; r ^= r << 5;
+        self.rng = r;
+        (r >> 8) as f32 / 8_388_608.0 - 1.0
     }
 }
 
