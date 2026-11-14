@@ -4,8 +4,8 @@ using System.Text;
 namespace WaveFix;
 
 /// <summary>
-/// The saved settings of one plugin, in Equalizer APO's format: plugins that save "chunks" use
-/// ChunkData (base64), the others a map of parameter name → value (0..1).
+/// The saved settings of one plugin: plugins that save "chunks" use ChunkData (base64), the others
+/// a map of parameter name → value (0..1). WaveFix's engine applies them the same way.
 /// </summary>
 public sealed class PluginState
 {
@@ -18,21 +18,6 @@ public sealed class PluginState
         o != null && ChunkData == o.ChunkData &&
         (Params?.Count ?? 0) == (o.Params?.Count ?? 0) &&
         (Params == null || Params.All(kv => o.Params!.TryGetValue(kv.Key, out var v) && Math.Abs(v - kv.Value) < 1e-6f));
-
-    /// <summary>The Equalizer APO config line, written exactly like its own editor writes it.</summary>
-    public static string ConfigLine(string library, PluginState? state)
-    {
-        var sb = new StringBuilder("VSTPlugin: Library \"").Append(library).Append('"');
-        if (!string.IsNullOrEmpty(state?.ChunkData))
-            sb.Append(" ChunkData \"").Append(state.ChunkData).Append('"');
-        else if (state?.Params != null)
-            foreach (var (name, value) in state.Params)
-            {
-                var n = name.Contains(' ') || name.Contains('"') ? "\"" + name.Replace("\"", "\"\"") + "\"" : name;
-                sb.Append(' ').Append(n).Append(' ').Append(value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture));
-            }
-        return sb.ToString();
-    }
 }
 
 /// <summary>
@@ -128,7 +113,7 @@ public sealed unsafe class VstPlugin : IDisposable
     public float GetParam(int i) => _getParam(_effect, i);
     public void SetParam(int i, float v) => _setParam(_effect, i, v);
 
-    /// <summary>Applies saved settings, exactly like Equalizer APO does before processing.</summary>
+    /// <summary>Applies saved settings, exactly like WaveFix's engine does before processing.</summary>
     public void WriteState(PluginState? s)
     {
         if (s == null || s.IsEmpty) return;
@@ -145,7 +130,7 @@ public sealed unsafe class VstPlugin : IDisposable
         }
     }
 
-    /// <summary>Reads the current settings in Equalizer APO's format.</summary>
+    /// <summary>Reads the current settings (chunk or parameters).</summary>
     public PluginState ReadState()
     {
         if (UsesChunks)

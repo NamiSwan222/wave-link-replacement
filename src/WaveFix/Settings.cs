@@ -26,8 +26,8 @@ public sealed class AppSettings
 {
     public string? MicDeviceId { get; set; }
     /// <summary>
-    /// Which audio engine runs the effects: "wavefix" (WaveFix's own, new installs) or "eapo"
-    /// (Equalizer APO, kept for people who set WaveFix up before the engine existed).
+    /// "wavefix" once the mic runs on WaveFix's own engine. "eapo" (or empty with Equalizer APO on
+    /// the mic) means a setup from before the engine existed, which setup switches over.
     /// </summary>
     public string? Engine { get; set; }
     /// <summary>True when settings.json existed at startup (an existing WaveFix user).</summary>

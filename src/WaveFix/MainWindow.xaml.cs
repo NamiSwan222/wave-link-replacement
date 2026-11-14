@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -78,7 +79,6 @@ public partial class MainWindow : Window
         RefreshMixer();
 
         // Plugins page
-        PluginStore.CleanOrphans(_plugins);
         PluginList.ItemsSource = _plugins;
         _plugins.CollectionChanged += (_, _) => EmptyPlugins.Visibility = _plugins.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyPlugins.Visibility = _plugins.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -225,24 +225,22 @@ public partial class MainWindow : Window
 
         if (Mic.DeviceId == null)
         { SetStatus(StatusKind.Bad, "No microphone found", "Plug in your mic and it'll show up here.", "No mic"); return; }
+        if (Setup.Migrate)
+        { SetStatus(StatusKind.Warn, "Switch to WaveFix's own engine", "WaveFix doesn't need Equalizer APO any more. One click moves your mic, settings and plugins over and removes it.", "Switch needed"); return; }
         if (!_engine.IsInstalled)
         {
-            SetStatus(StatusKind.Bad, "Let's finish setting up", _engine.UseWaveFixEngine
-                ? "WaveFix needs to install its audio engine to run your effects. It does it for you in one click."
-                : "WaveFix needs a free audio add-on (Equalizer APO) to run your effects. It can install everything for you.", "Setup needed");
+            SetStatus(StatusKind.Bad, "Let's finish setting up", "WaveFix needs to install its audio engine to run your effects. It does it for you in one click.", "Setup needed");
             return;
         }
-        if (_engine.UseWaveFixEngine && WaveFixEngine.NeedsUpdate)
+        if (WaveFixEngine.NeedsUpdate)
         { SetStatus(StatusKind.Warn, "Update the audio engine", "A newer WaveFix audio engine is ready. One click installs it (Windows asks for permission once).", "Update ready"); return; }
         if (Process.GetProcessesByName("Elgato.WaveLink").Length > 0)
         { SetStatus(StatusKind.Warn, "Wave Link is still open", "Close Wave Link. While it runs, people watching your Discord stream can hear your mic.", "Close Wave Link"); return; }
 
-        switch (_engine.Slot(Mic.DeviceId))
+        switch (_engine.IsConnected(Mic.DeviceId))
         {
-            case EffectsEngine.SlotState.None:
+            case false:
                 SetStatus(StatusKind.Bad, "Effects aren't connected to this mic", "One click connects them, so every app, Discord included, hears your cleaned-up voice.", "Setup needed"); break;
-            case EffectsEngine.SlotState.StreamOnly:
-                SetStatus(StatusKind.Warn, "Almost there", "Discord skips the effects in this setup. One click fixes it.", "Almost there"); break;
             default:
                 if (_settings.NoiseRemoval && !_engine.HasNoisePlugin)
                     SetStatus(StatusKind.Warn, "Noise removal is missing a file", "One click downloads and adds the noise removal plugin.", "Missing file");
@@ -283,26 +281,34 @@ public partial class MainWindow : Window
     // ---------- Engine ----------
 
     /// <summary>
-    /// Picks the engine once: people who already run WaveFix on Equalizer APO keep it; everyone
-    /// else (new installs) gets WaveFix's own engine.
+    /// Setups from before WaveFix had its own engine ran on Equalizer APO: send those to the Setup
+    /// page, where one run switches the mic over, moves the plugins and removes Equalizer APO.
     /// </summary>
     void ChooseEngine()
     {
-        if (_settings.Engine is not ("wavefix" or "eapo"))
+        bool onEapo = _settings.Engine == "eapo" || (Mic.DeviceId != null && EqualizerApo.IsOnMic(Mic.DeviceId))
+            || _settings.Plugins.Any(p => !p.Path.StartsWith(WaveFixEngine.PluginDir, StringComparison.OrdinalIgnoreCase));
+        Setup.Migrate = onEapo && _settings.Existed;
+        if (Setup.Migrate) ChangeLog.Write("Setup from before WaveFix's engine found: switching it over");
+        if (!Setup.Migrate && _settings.Engine != "wavefix") { _settings.Engine = "wavefix"; _settings.Save(); }
+        SetupNote.Text = Setup.Migrate
+            ? "WaveFix now has its own audio engine, so it no longer needs Equalizer APO. Windows asks for permission once; your sound drops for a few seconds while Windows audio restarts. Your settings and plugins come along, your mic's original effects are put back, and Equalizer APO is uninstalled (unless another device still uses it)."
+            : "Windows will ask for permission once. Your sound drops for a few seconds at the end while Windows audio restarts. WaveFix installs its own audio engine and adds itself after any effects your mic already has (they keep working). It downloads the RNNoise plugin from GitHub and checks it against a known fingerprint. Steps that are already done are skipped.";
+    }
+
+    /// <summary>After a successful switch: plugins now live in Program Files, the mic runs on the engine.</summary>
+    void FinishSwitch()
+    {
+        foreach (var p in _plugins)
         {
-            bool existingEapoUser = _settings.Existed && (_engine.EapoInstalled
-                || (Mic.DeviceId != null && EffectsEngine.GetSlot(Mic.DeviceId) != EffectsEngine.SlotState.None));
-            _settings.Engine = existingEapoUser ? "eapo" : "wavefix";
-            ChangeLog.Write($"Audio engine: {_settings.Engine} ({(existingEapoUser ? "existing Equalizer APO setup" : "new install")})");
-            _settings.Save();
+            var moved = Path.Combine(WaveFixEngine.PluginDir, Path.GetFileName(p.Path));
+            if (File.Exists(moved)) p.Path = moved;
+            else p.Enabled = false; // couldn't be moved (gone, or not a usable plugin)
         }
-        bool engine = _settings.Engine == "wavefix" && WaveFixEngine.Available;
-        _engine.UseWaveFixEngine = engine;
-        Setup.UseEngine = engine;
-        PluginStore.UseEngine = engine;
-        SetupNote.Text = engine
-            ? "Windows will ask for permission once. Your sound drops for a few seconds at the end while Windows audio restarts. WaveFix installs its own audio engine and adds itself after any effects your mic already has (they keep working). It downloads the RNNoise plugin from GitHub and checks it against a known fingerprint. Steps that are already done are skipped."
-            : SetupNote.Text;
+        _settings.Engine = "wavefix";
+        Setup.Migrate = false;
+        ChangeLog.Write("Switched to WaveFix's engine");
+        ChooseEngine();
     }
 
     async void UndoSetup_Click(object sender, RoutedEventArgs e)
@@ -340,9 +346,9 @@ public partial class MainWindow : Window
         var done = Setup.DoneSteps(Mic.DeviceId);
         string[] todo =
         {
-            Setup.UseEngine ? "WaveFix's own engine that runs your effects inside Windows audio." : "Free audio engine add-on that runs your effects inside Windows.",
-            "AI noise removal (RNNoise), checked and copied into place.",
-            "Puts the effects on this mic so Discord, OBS and every app get them.",
+            "WaveFix's own engine that runs your effects inside Windows audio.",
+            Setup.Migrate ? "Noise removal and your own plugins move to WaveFix's protected folder." : "AI noise removal (RNNoise), checked and copied into place.",
+            Setup.Migrate ? "Your mic's original effects come back, WaveFix's engine joins them, Equalizer APO goes." : "Puts the effects on this mic so Discord, OBS and every app get them.",
             "Only if something changed. Sound drops for a few seconds.",
         };
         for (int i = 0; i < _setupSteps.Count; i++)
@@ -353,7 +359,7 @@ public partial class MainWindow : Window
         bool complete = Setup.IsComplete(Mic.DeviceId);
         SetupButtonText.Text = complete ? "Everything's set up" : "Set it up for me";
         SetupButton.IsEnabled = !complete;
-        UndoSetupButton.Visibility = Setup.UseEngine && WaveFixEngine.IsAttached(Mic.DeviceId) ? Visibility.Visible : Visibility.Collapsed;
+        UndoSetupButton.Visibility = !Setup.Migrate && WaveFixEngine.IsAttached(Mic.DeviceId) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     void RunSetup_Click(object sender, RoutedEventArgs e) => _ = RunSetup(null);
@@ -389,13 +395,16 @@ public partial class MainWindow : Window
         });
 
         bool ok;
-        try { ok = await Setup.RunAsync(micId, progress, localPlugin); }
+        // When switching from Equalizer APO, plugins in the old shared folder move to Program Files.
+        var toMove = Setup.Migrate ? _plugins.Select(p => p.Path).Where(File.Exists).ToList() : null;
+        try { ok = await Setup.RunAsync(micId, progress, localPlugin, toMove); }
         catch (Exception ex) { ok = false; ShowSetupResult(false, ex.Message); }
         _setupRunning = false;
         _setupShowsResult = ok;
 
         if (ok)
         {
+            if (Setup.Migrate) FinishSwitch();
             _settings.MicDeviceId = micId;
             ApplyEffects(); // write the effect chain for this mic now that the engine is in place
             ShowSetupResult(true, "All done! Your effects now work in Discord, OBS and every other app. Head to Microphone to tune your sound.");
@@ -530,7 +539,7 @@ public partial class MainWindow : Window
     void NoiseSettings_Click(object sender, RoutedEventArgs e)
     {
         if (!_engine.HasNoisePlugin) { NavSetup.Visibility = Visibility.Visible; NavSetup.IsChecked = true; return; }
-        OpenPluginSettings(_engine.ActiveNoisePlugin, "Noise removal", () => _settings.NoiseState, s => _settings.NoiseState = s);
+        OpenPluginSettings(_engine.NoisePlugin, "Noise removal", () => _settings.NoiseState, s => _settings.NoiseState = s);
     }
 
     void NoiseReset_Click(object sender, RoutedEventArgs e)
@@ -590,7 +599,7 @@ public partial class MainWindow : Window
                 var s = System.Text.Json.JsonSerializer.Deserialize<PluginState>(System.IO.File.ReadAllText(stateFile));
                 if (s == null || s.IsEmpty) return;
                 set(s);
-                ApplyEffects(); // Equalizer APO reloads the chain with the new settings
+                ApplyEffects(); // the engine reloads the chain with the new settings
             }
             catch { /* file mid-write: next tick */ }
         }
@@ -670,7 +679,7 @@ public partial class MainWindow : Window
 
         // Skip the built-in noise removal and plugins already in the list (by name: we keep copies).
         var have = new HashSet<string>(_plugins.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
-        var skip = new[] { _engine.ActiveNoisePlugin, _engine.ActiveNoisePlugin.Replace("_mono", "_stereo") };
+        var skip = new[] { _engine.NoisePlugin, _engine.NoisePlugin.Replace("_mono", "_stereo") };
         try
         {
             var found = await Task.Run(() => PluginStore.Scan(folders, skip, cts.Token), cts.Token);
@@ -731,7 +740,6 @@ public partial class MainWindow : Window
         if ((sender as FrameworkElement)?.Tag is not PluginEntry p) return;
         _plugins.Remove(p);
         ApplyEffects(); // take it out of the chain first so the engine releases it
-        PluginStore.Uninstall(p, _plugins);
     }
 
     // ---------- Shortcuts ----------

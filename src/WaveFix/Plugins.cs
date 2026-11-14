@@ -17,22 +17,19 @@ public sealed class PluginEntry : Observable
 }
 
 /// <summary>
-/// Adds user VST plugins. Equalizer APO loads them inside audiodg.exe (running as LOCAL SERVICE),
-/// which can't read files in a user's profile, so plugins are copied to a shared folder.
+/// Adds user VST plugins. WaveFix's engine loads them inside audiodg.exe, and only from its
+/// admin-only folder in Program Files, so plugins are copied there (one Windows prompt).
 /// </summary>
 public static class PluginStore
 {
-    /// <summary>With WaveFix's own engine, plugins live in Program Files (admin-only) instead.</summary>
-    public static bool UseEngine { get; set; }
-
-    public static string Folder => UseEngine ? WaveFixEngine.PluginDir : System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WaveFix", "Plugins");
+    /// <summary>Program Files\WaveFix\Plugins: admin-only, so nothing else can swap a plugin for other code.</summary>
+    public static string Folder => WaveFixEngine.PluginDir;
 
     /// <summary>Checks the file is a 64-bit VST2 plugin. Returns an error message, or null if OK.</summary>
     public static string? Validate(string file)
     {
         if (file.EndsWith(".vst3", StringComparison.OrdinalIgnoreCase))
-            return "That's a VST3 plugin. Windows' audio engine (through Equalizer APO) only runs VST2 plugins (.dll). Many plugins ship both: look for the .dll version.";
+            return "That's a VST3 plugin. WaveFix's audio engine only runs VST2 plugins (.dll). Many plugins ship both: look for the .dll version.";
         byte[] bytes;
         try { bytes = File.ReadAllBytes(file); }
         catch (Exception ex) { return $"Couldn't read the file: {ex.Message}"; }
@@ -105,12 +102,11 @@ public static class PluginStore
     }
 
     /// <summary>
-    /// Installs a plugin and returns its entry, or null if the user declined the Windows prompt.
-    /// WaveFix engine: copied into Program Files by an admin helper (one prompt).
+    /// Copies a plugin into Program Files by an admin helper (one Windows prompt) and returns its
+    /// entry, or null if the prompt was declined.
     /// </summary>
     public static async Task<PluginEntry?> InstallAsync(string file)
     {
-        if (!UseEngine) return Install(file);
         var name = System.IO.Path.GetFileNameWithoutExtension(file);
         var dest = System.IO.Path.Combine(Folder, System.IO.Path.GetFileName(file));
         for (int i = 2; File.Exists(dest) && !SameFile(dest, file); i++)
@@ -119,40 +115,9 @@ public static class PluginStore
         return new PluginEntry { Name = name, Path = dest, Enabled = true };
     }
 
-    /// <summary>Copies the plugin into the shared folder and returns the new entry.</summary>
-    public static PluginEntry Install(string file)
-    {
-        Directory.CreateDirectory(Folder);
-        var name = System.IO.Path.GetFileNameWithoutExtension(file);
-        var dest = System.IO.Path.Combine(Folder, System.IO.Path.GetFileName(file));
-        // Don't overwrite a different plugin that happens to share a file name.
-        for (int i = 2; File.Exists(dest) && !SameFile(dest, file); i++)
-            dest = System.IO.Path.Combine(Folder, $"{name} ({i}).dll");
-        if (!File.Exists(dest)) File.Copy(file, dest);
-        return new PluginEntry { Name = name, Path = dest, Enabled = true };
-    }
-
     static bool SameFile(string a, string b)
     {
         var fa = new FileInfo(a); var fb = new FileInfo(b);
         return fa.Length == fb.Length && File.ReadAllBytes(a).AsSpan().SequenceEqual(File.ReadAllBytes(b));
-    }
-
-    /// <summary>Deletes copies that no plugin entry uses any more (left behind while they were still loaded).</summary>
-    public static void CleanOrphans(IEnumerable<PluginEntry> inUse)
-    {
-        if (UseEngine || !Directory.Exists(Folder)) return; // Program Files needs admin: leave them
-        var used = new HashSet<string>(inUse.Select(p => p.Path), StringComparer.OrdinalIgnoreCase);
-        foreach (var f in Directory.EnumerateFiles(Folder, "*.dll"))
-            if (!used.Contains(f)) try { File.Delete(f); } catch { /* still loaded; try next start */ }
-    }
-
-    /// <summary>Deletes the copied file if no other entry uses it (best effort: it may be loaded).</summary>
-    public static void Uninstall(PluginEntry p, IEnumerable<PluginEntry> remaining)
-    {
-        if (UseEngine) return; // the engine stops loading it; the file in Program Files is harmless
-        if (!p.Path.StartsWith(Folder, StringComparison.OrdinalIgnoreCase)) return;
-        if (remaining.Any(r => string.Equals(r.Path, p.Path, StringComparison.OrdinalIgnoreCase))) return;
-        try { File.Delete(p.Path); } catch { /* still loaded by the audio engine; harmless */ }
     }
 }

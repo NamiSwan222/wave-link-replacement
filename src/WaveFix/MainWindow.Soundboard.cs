@@ -47,9 +47,9 @@ public partial class MainWindow
     {
         var sb = _settings.Soundboard;
         string? notice = null;
-        if (!VoiceFx.Available) notice = "This copy of WaveFix was built without its audio engine plugin, so sounds can't reach your mic. Install the latest release.";
+        if (!VoiceFx.Available) notice = "This copy of WaveFix was built without its audio engine, so sounds can't reach your mic. Install the latest release.";
         else if (sb.Enabled && _soundboard.Error is { } err) notice = $"The soundboard couldn't start: {err}";
-        else if (sb.Enabled && !_engine.IsInstalled) notice = "Finish setup first (Microphone page): sounds are mixed in by the same audio add-on as your effects.";
+        else if (sb.Enabled && !_engine.IsInstalled) notice = "Finish setup first: sounds are mixed in by WaveFix's audio engine, like your effects.";
         else if (sb.Enabled && !_soundboard.Connected) notice = "Waiting for Windows audio to pick up the soundboard. If this stays, make sure setup is finished, then turn the soundboard off and on again.";
         SoundboardNotice.Visibility = notice == null ? Visibility.Collapsed : Visibility.Visible;
         SoundboardNoticeText.Text = notice ?? "";

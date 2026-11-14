@@ -10,7 +10,7 @@ namespace WaveFix;
 
 /// <summary>
 /// WaveFix's own audio engine (native/wavefix-engine): a Windows audio effect (APO) that runs the
-/// mic chain inside audiodg.exe, used instead of Equalizer APO on new installs.
+/// mic chain inside audiodg.exe.
 ///
 /// Layout:
 ///   Program Files\WaveFix\Engine\wavefix-engine-&lt;hash&gt;.dll   the engine (admin-only folder)
@@ -190,8 +190,12 @@ public static class WaveFixEngine
 
     static bool IsUs(string clsid) => string.Equals(clsid.Trim(), Clsid, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Saves the mic's original effect settings before the first change (admin helper).</summary>
-    public static void BackupMic(string guid)
+    /// <summary>
+    /// Saves the mic's original effect settings before the first change (admin helper). When the
+    /// mic still has Equalizer APO on it, the original endpoint effect comes from Equalizer APO's
+    /// own record, so undo never puts Equalizer APO back.
+    /// </summary>
+    public static void BackupMic(string guid, bool fromEqualizerApo = false)
     {
         using var existing = Hklm.OpenSubKey($@"{BackupKey}\{Name(guid)}");
         if (existing != null) return;
@@ -200,6 +204,8 @@ public static class WaveFixEngine
         foreach (var name in new[] { $"{FxClsid},{Efx}", $"{FxClsid},{CompositeEfx}", $"{FxModes},{Efx}" })
         {
             var v = fx?.GetValue(name);
+            if (fromEqualizerApo && name == $"{FxClsid},{Efx}") v = EqualizerApo.OriginalEndpointEffect(guid);
+            if (fromEqualizerApo && v is string[] list) v = list.Where(c => !c.Trim().Equals("{EC1CC9CE-FAED-4822-828A-82A81A6F018F}", StringComparison.OrdinalIgnoreCase)).ToArray() is { Length: > 0 } rest ? rest : null;
             if (v is string s) key.SetValue(name, s, RegistryValueKind.String);
             else if (v is string[] m) key.SetValue(name, m, RegistryValueKind.MultiString);
             else key.SetValue(name + " (none)", 1, RegistryValueKind.DWord);
@@ -275,8 +281,8 @@ public static class WaveFixEngine
             return o;
         }
 
-        // Same order as the Equalizer APO chain: rumble filter, noise removal, tone, the user's
-        // plugins, voice polish and voice changer, boost, then soundboard and peak protection.
+        // Rumble filter, then noise removal on the cleanest signal, tone, the user's plugins, voice
+        // polish and voice changer, boost, then soundboard and peak protection.
         if (s.LowCut) Filter("hp", 80);
         if (s.NoiseRemoval && HasNoisePlugin) stages.Add(Vst(NoisePlugin, s.NoiseState));
         if (s.EqPreset == EqPresets.Custom)

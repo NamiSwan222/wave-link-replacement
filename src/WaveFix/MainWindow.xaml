@@ -165,7 +165,7 @@
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock x:Name="SetupNote" Grid.Column="1" Style="{StaticResource Hint}" TextWrapping="Wrap"
-                                       Text="Windows will ask for permission once. Your sound drops for a few seconds at the end while Windows audio restarts. WaveFix downloads Equalizer APO (from SourceForge) and the RNNoise plugin (from GitHub) and checks each against a known fingerprint before using it. Steps that are already done are skipped."/>
+                                       Text="Windows will ask for permission once. Your sound drops for a few seconds at the end while Windows audio restarts."/>
                         </Grid>
                     </Border>
                 </StackPanel>

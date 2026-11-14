@@ -1,18 +1,20 @@
 WaveFix: mic effects that stay out of your Discord stream
 
 WaveFix is the control panel. Your effects run inside Windows' own audio engine through
-Equalizer APO, which is why your mic can't leak into Discord streams the way it does with
-Wave Link.
+WaveFix's audio engine, which is why your mic can't leak into Discord streams the way it does
+with Wave Link.
 
 Setup is automatic. The first time you open WaveFix it shows a "Set it up for me"
 button that, after one Windows permission prompt:
 
-  1. Installs Equalizer APO (free, from SourceForge)
+  1. Installs WaveFix's audio engine
   2. Adds the RNNoise noise removal plugin (free, from GitHub)
-  3. Connects the effects to the microphone you pick
+  3. Connects the engine to the microphone you pick (its existing effects keep working)
   4. Restarts Windows audio (your sound drops for a few seconds)
 
-Each download is checked against a known fingerprint before it's used, and steps that
+Used WaveFix with Equalizer APO before? The same button switches you over and removes it.
+
+The download is checked against a known fingerprint before it's used, and steps that
 are already done are skipped.
 
 Full guide: https://github.com/NamiSwan222/wave-link-replacement

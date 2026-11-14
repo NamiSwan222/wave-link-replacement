@@ -1,70 +1,20 @@
 using System.IO;
-using System.Security.Cryptography;
 
 namespace WaveFix;
 
 /// <summary>
-/// WaveFix's own effects plugin (native/wavefix-fx, a VST2 written in Rust). It's embedded in
-/// WaveFix.exe and copied to a shared folder, because Equalizer APO loads it inside the Windows
-/// audio engine (audiodg.exe, LOCAL SERVICE), which can't read files in a user's profile.
-/// Running there, like the rest of the chain, keeps the processed mic out of Discord streams.
+/// WaveFix's own effects (voice polish, voice changer, soundboard, peak protection), from
+/// native/wavefix-fx. They're built into WaveFix's audio engine; this class turns the app's
+/// settings into their parameter values.
 /// </summary>
 public static class VoiceFx
 {
-    const string ResourceName = "WaveFix.VoiceFx.dll";
-    const string FilePrefix = "wavefix-fx-";
-
+    /// <summary>ProgramData\WaveFix\Engine: the engine's config and status, and the soundboard bridge.</summary>
     public static string Folder => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WaveFix", "Engine");
 
-    static string? _path;
-    static bool _tried;
-
-    /// <summary>
-    /// Path of the installed plugin, or null if this build doesn't include it or it couldn't be
-    /// copied. The file name carries a hash of its contents: a loaded copy can't be overwritten,
-    /// so a new version is written next to it and the old one deleted once it's free.
-    /// </summary>
-    public static string? InstalledPath
-    {
-        get
-        {
-            if (_tried) return _path;
-            _tried = true;
-            try { _path = Install(); }
-            catch (Exception ex) { ChangeLog.Write($"Voice effects plugin couldn't be installed: {ex.Message}"); }
-            return _path;
-        }
-    }
-
-    /// <summary>
-    /// This build includes WaveFix's effects. Only checks the exe: the copy in ProgramData is only
-    /// made when Equalizer APO needs it (WaveFix's own engine has the effects built in).
-    /// </summary>
-    public static bool Available => typeof(VoiceFx).Assembly.GetManifestResourceInfo(ResourceName) != null;
-
-    static string? Install()
-    {
-        using var stream = typeof(VoiceFx).Assembly.GetManifestResourceStream(ResourceName);
-        if (stream == null) return null;
-        using var ms = new MemoryStream();
-        stream.CopyTo(ms);
-        var bytes = ms.ToArray();
-        var hash = Convert.ToHexString(SHA256.HashData(bytes))[..12].ToLowerInvariant();
-
-        Directory.CreateDirectory(Folder);
-        var dest = Path.Combine(Folder, $"{FilePrefix}{hash}.dll");
-        if (!File.Exists(dest) || !File.ReadAllBytes(dest).AsSpan().SequenceEqual(bytes))
-        {
-            var tmp = dest + ".tmp";
-            File.WriteAllBytes(tmp, bytes);
-            File.Move(tmp, dest, overwrite: true);
-        }
-        foreach (var old in Directory.EnumerateFiles(Folder, FilePrefix + "*.dll"))
-            if (!string.Equals(old, dest, StringComparison.OrdinalIgnoreCase))
-                try { File.Delete(old); } catch { /* still loaded by the audio engine; next start */ }
-        return dest;
-    }
+    /// <summary>This build includes WaveFix's audio engine (and so its effects).</summary>
+    public static bool Available => WaveFixEngine.Available;
 
     // ---- Parameters: same names, ranges and order as native/wavefix-fx/src/params.rs ----
 
@@ -108,12 +58,8 @@ public static class VoiceFx
     /// Config line for the main instance (expander, de-esser, leveler, voice changer), or null
     /// when none of them is on. It runs after the tone and the user's plugins, before mic boost.
     /// </summary>
-    public static string? MainLine(PolishSettings polish, VoiceSettings voice) =>
-        MainParams(polish, voice) is { } p && InstalledPath is { } dll ? PluginState.ConfigLine(dll, new PluginState { Params = p }) : null;
-
     /// <summary>
-    /// Settings (name -> 0..1) for the main instance, or null when none of its effects is on. Used
-    /// as an Equalizer APO plugin line, or directly by the WaveFix engine.
+    /// Settings (name -> 0..1) for the main effects stage, or null when none of its effects is on.
     /// </summary>
     public static Dictionary<string, float>? MainParams(PolishSettings polish, VoiceSettings voice)
     {
@@ -156,9 +102,6 @@ public static class VoiceFx
     /// Config line for the last instance (after mic boost), or null: the soundboard is mixed in
     /// there (so the voice changer doesn't pitch it), then peak protection.
     /// </summary>
-    public static string? OutputLine(PolishSettings polish, SoundboardSettings soundboard) =>
-        OutputParams(polish, soundboard) is { } p && InstalledPath is { } dll ? PluginState.ConfigLine(dll, new PluginState { Params = p }) : null;
-
     /// <summary>Settings for the last instance (soundboard, peak protection), or null when both are off.</summary>
     public static Dictionary<string, float>? OutputParams(PolishSettings polish, SoundboardSettings soundboard)
     {
@@ -187,7 +130,7 @@ public sealed class PolishSettings
 /// <summary>Custom voice tone: five bands, in dB.</summary>
 public sealed class CustomEq
 {
-    /// <summary>Equalizer APO filter type and frequency of each band (peaking bands use Q 1).</summary>
+    /// <summary>Filter type and frequency of each band (peaking bands use Q 1).</summary>
     public static readonly (string Label, string Hint, string Type, int Hz)[] Bands =
     {
         ("Bass", "100 Hz", "LS", 100),

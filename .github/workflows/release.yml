@@ -40,7 +40,7 @@ jobs:
 
       - name: Publish app (self-contained, single file)
         run: >
-          dotnet publish src/WaveFix/WaveFix.csproj -c Release -r win-x64 --self-contained true -p:RequireVoiceFx=true
+          dotnet publish src/WaveFix/WaveFix.csproj -c Release -r win-x64 --self-contained true -p:RequireEngine=true
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=true -p:DebugType=none
           -p:Version=${{ env.VERSION }} -o publish

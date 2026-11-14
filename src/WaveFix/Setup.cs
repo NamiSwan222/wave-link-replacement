@@ -12,11 +12,13 @@ namespace WaveFix;
 
 /// <summary>
 /// One-click first-time setup. The same WaveFix.exe runs in three roles:
-///   normal app    → shows progress, starts the admin helper with one UAC prompt
-///   --setup       → admin helper: installs Equalizer APO + RNNoise, attaches, restarts audio
-///   --system-attach → runs briefly as SYSTEM (the owner of the mic's effect settings) to write them
+///   normal app      -> shows progress, starts the admin helper with one UAC prompt
+///   --setup         -> admin helper: installs WaveFix's audio engine + RNNoise, attaches, restarts audio
+///   --system-attach -> runs briefly as SYSTEM (the owner of the mic's effect settings) to write them
 /// Progress goes to a log file as lines like "STEP 2 DONE message", which the app reads.
 /// Every download is checked against a pinned SHA-256 before it's used.
+/// With --migrate (people who set WaveFix up on Equalizer APO before it had its own engine), the
+/// same run also moves their plugins, takes Equalizer APO off the mic and uninstalls it.
 /// </summary>
 /// <summary>One row of the setup checklist.</summary>
 public sealed class SetupStepRow : Observable
@@ -40,9 +42,7 @@ public sealed class SetupStepRow : Observable
 
 public static class Setup
 {
-    // Pinned downloads. To update a version, change the URL and its SHA-256 together.
-    const string EapoUrl = "https://sourceforge.net/projects/equalizerapo/files/1.4.2/EqualizerAPO-x64-1.4.2.exe/download";
-    const string EapoSha256 = "7403BE7427BBE1936A40DDED082829B6E217FC4F5990FEE5CBA501F0AE055AFA";
+    // Pinned download. To update a version, change the URL and its SHA-256 together.
     const string RnnoiseUrl = "https://github.com/werman/noise-suppression-for-voice/releases/download/v1.10/win-rnnoise.zip";
     const string RnnoiseSha256 = "E4DCC186102850F8DCEBEB766AD1BF34C24F6280BD614EF84B72DAE4783FC517";
     const string RnnoiseEntry = "win-rnnoise/vst/rnnoise_mono.dll";
@@ -52,55 +52,49 @@ public static class Setup
     /// <summary>The last setup run's log, kept so it can be copied and sent for help.</summary>
     public static string LastLogPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WaveFix", "setup.log");
 
-    const string EapoEfx = "{EC1CC9CE-FAED-4822-828A-82A81A6F018F}";
-    const string EapoSfx = "{EACD2258-FCAC-4FF4-B36D-419E924A6D79}";
-    const string ModeDefault = "{C18E2F7E-933D-4965-B7D1-1EEF228D2AF3}";
-    const string FxClsid = "{d04e05a6-594b-4fb6-a80d-01af5eed7d1d}";   // PKEY_FX_*EffectClsid (,1 ,2 ,5 ,6 ,7)
-    const string FxModes = "{d3993a3f-99c2-4402-b5ec-a92a0367664b}";   // PKEY_*_ProcessingModes_Supported_For_Streaming
     const string TaskName = "WaveFix Setup";
 
-    /// <summary>Set up WaveFix's own engine (new installs) rather than Equalizer APO.</summary>
-    public static bool UseEngine { get; set; }
+    /// <summary>Switching an Equalizer APO setup (WaveFix 0.8.0 and older) to WaveFix's engine.</summary>
+    public static bool Migrate { get; set; }
 
-    public static string[] StepTitles => UseEngine
-        ? new[] { "Install the WaveFix audio engine", "Add the noise removal plugin", "Connect the engine to your mic", "Restart Windows audio" }
-        : new[] { "Install Equalizer APO", "Add the noise removal plugin", "Connect the effects to your mic", "Restart Windows audio" };
+    public static string[] StepTitles => Migrate
+        ? new[] { "Install the WaveFix audio engine", "Move noise removal and your plugins", "Switch your mic and remove Equalizer APO", "Restart Windows audio" }
+        : new[] { "Install the WaveFix audio engine", "Add the noise removal plugin", "Connect the engine to your mic", "Restart Windows audio" };
 
     static string WorkDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WaveFix", "Setup");
-    static string EapoDir
-    {
-        get
-        {
-            try { if (Registry.LocalMachine.OpenSubKey(@"SOFTWARE\EqualizerAPO")?.GetValue("InstallPath") is string p && p.Length > 0) return p; } catch { }
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "EqualizerAPO");
-        }
-    }
-    static string NoisePlugin => UseEngine ? WaveFixEngine.NoisePlugin : Path.Combine(EapoDir, "VSTPlugins", "rnnoise", "rnnoise_mono.dll");
+    static string NoisePlugin => WaveFixEngine.NoisePlugin;
 
     public static string GuidOf(string endpointId) => endpointId[(endpointId.LastIndexOf('.') + 1)..];
 
     /// <summary>What still needs doing for this mic (for the checklist and the status banner).</summary>
-    public static bool[] DoneSteps(string endpointId) => UseEngine
-        ? new[] { WaveFixEngine.IsInstalled && !WaveFixEngine.NeedsUpdate, File.Exists(NoisePlugin), WaveFixEngine.IsAttached(endpointId), false }
-        : new[]
-        {
-            File.Exists(Path.Combine(EapoDir, "EqualizerAPO.dll")),
-            File.Exists(NoisePlugin),
-            EffectsEngine.GetSlot(endpointId) == EffectsEngine.SlotState.Endpoint,
-            false,
-        };
+    public static bool[] DoneSteps(string endpointId) => new[]
+    {
+        WaveFixEngine.IsInstalled && !WaveFixEngine.NeedsUpdate,
+        File.Exists(NoisePlugin) && !Migrate,
+        WaveFixEngine.IsAttached(endpointId) && !EqualizerApo.IsOnMic(endpointId),
+        false,
+    };
 
     public static bool IsComplete(string endpointId) => DoneSteps(endpointId).Take(3).All(d => d);
 
     // ======================= Normal app: start the helper =======================
 
     /// <summary>Starts the admin helper (one UAC prompt) and reports "STEP n STATE message" lines.</summary>
-    public static async Task<bool> RunAsync(string endpointId, IProgress<(int step, string state, string message)> progress, string? localPlugin = null, CancellationToken ct = default)
+    public static async Task<bool> RunAsync(string endpointId, IProgress<(int step, string state, string message)> progress, string? localPlugin = null,
+        IReadOnlyList<string>? pluginsToMove = null, CancellationToken ct = default)
     {
         var log = LastLogPath;
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
         File.WriteAllText(log, "");
-        var args = $"--setup {GuidOf(endpointId)} \"{log}\"" + (UseEngine ? " --engine" : "") + (localPlugin != null ? $" \"{localPlugin}\"" : "");
+        var args = $"--setup {GuidOf(endpointId)} \"{log}\"" + (Migrate ? " --migrate" : "");
+        if (pluginsToMove is { Count: > 0 })
+        {
+            // Plugins from the old shared folder, copied into Program Files by the admin helper.
+            var list = Path.Combine(Path.GetDirectoryName(log)!, "plugins-to-move.txt");
+            File.WriteAllLines(list, pluginsToMove);
+            args += $" --plugins \"{list}\"";
+        }
+        if (localPlugin != null) args += $" \"{localPlugin}\"";
         Process? p;
         try
         {
@@ -140,7 +134,7 @@ public static class Setup
     static void Log(string line) { _log?.WriteLine(line); _log?.Flush(); }
     static void Step(int n, string state, string msg = "") => Log($"STEP {n} {state} {msg}".TrimEnd());
 
-    public static int RunElevated(string micGuid, string logPath, string? localPlugin = null)
+    public static int RunElevated(string micGuid, string logPath, string? localPlugin = null, string? pluginList = null)
     {
         using var w = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
         _log = w;
@@ -149,79 +143,68 @@ public static class Setup
             if (!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
                 throw new InvalidOperationException("The setup helper needs administrator rights.");
             Directory.CreateDirectory(WorkDir);
-            Log($"LOG WaveFix {Updater.Current} setup, Windows {Environment.OSVersion.Version}, mic {micGuid}, local plugin: {localPlugin ?? "none"}");
+            Log($"LOG WaveFix {Updater.Current} setup, Windows {Environment.OSVersion.Version}, mic {micGuid}, migrate: {Migrate}, local plugin: {localPlugin ?? "none"}");
             using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan }; // our own watchdogs handle stalls
             http.DefaultRequestHeaders.UserAgent.ParseAdd($"WaveFix-Setup/{Updater.Current}");
             bool changed = false;
+            var guid = micGuid.Trim('{', '}');
 
-            // 1. The engine (WaveFix's own, or Equalizer APO for existing setups)
-            if (UseEngine)
-            {
-                if (WaveFixEngine.IsInstalled && !WaveFixEngine.NeedsUpdate) Step(0, "SKIP", "Already installed");
-                else
-                {
-                    Step(0, "RUN", WaveFixEngine.IsInstalled ? "Updating the WaveFix audio engine…" : "Installing the WaveFix audio engine…");
-                    WaveFixEngine.Install();
-                    if (!WaveFixEngine.IsInstalled) throw new InvalidOperationException("Windows didn't accept the audio engine's registration.");
-                    Step(0, "DONE", "Installed");
-                    changed = true;
-                }
-            }
-            else if (File.Exists(Path.Combine(EapoDir, "EqualizerAPO.dll"))) Step(0, "SKIP", "Already installed");
+            // 1. WaveFix's audio engine
+            if (WaveFixEngine.IsInstalled && !WaveFixEngine.NeedsUpdate) Step(0, "SKIP", "Already installed");
             else
             {
-                Step(0, "RUN", "Downloading Equalizer APO…");
-                var exe = Download(http, EapoUrl, EapoSha256, "EqualizerAPO-x64-1.4.2.exe", 0, "Downloading Equalizer APO");
-                Step(0, "RUN", "Installing Equalizer APO…");
-                using (var inst = Process.Start(new ProcessStartInfo(exe, "/S") { UseShellExecute = false }))
-                {
-                    if (inst == null) throw new InvalidOperationException("Equalizer APO's installer didn't start.");
-                    // Its installer may open Device Selector at the end and wait for it. WaveFix picks
-                    // the device itself, so close that window whenever it shows up.
-                    var until = DateTime.Now.AddMinutes(5);
-                    while (!inst.WaitForExit(1000))
-                    {
-                        foreach (var ds in Process.GetProcessesByName("DeviceSelector")) try { ds.Kill(); } catch { }
-                        if (DateTime.Now > until) throw new InvalidOperationException("Equalizer APO's installer didn't finish.");
-                    }
-                }
-                foreach (var ds in Process.GetProcessesByName("DeviceSelector")) try { ds.Kill(); } catch { }
-                if (!File.Exists(Path.Combine(EapoDir, "EqualizerAPO.dll"))) throw new InvalidOperationException("Equalizer APO didn't install.");
+                Step(0, "RUN", WaveFixEngine.IsInstalled ? "Updating the WaveFix audio engine…" : "Installing the WaveFix audio engine…");
+                WaveFixEngine.Install();
+                if (!WaveFixEngine.IsInstalled) throw new InvalidOperationException("Windows didn't accept the audio engine's registration.");
                 Step(0, "DONE", "Installed");
                 changed = true;
             }
 
-            // 2. RNNoise plugin
-            if (File.Exists(NoisePlugin)) Step(1, "SKIP", "Already there");
+            // 2. RNNoise (and, when switching, the user's own plugins) into Program Files\WaveFix\Plugins
+            if (File.Exists(NoisePlugin) && pluginList == null) Step(1, "SKIP", "Already there");
             else
             {
-                if (localPlugin != null)
+                if (!File.Exists(NoisePlugin))
                 {
-                    Step(1, "RUN", "Checking the file you picked…");
-                    InstallNoisePlugin(localPlugin);
+                    if (localPlugin != null) { Step(1, "RUN", "Checking the file you picked…"); InstallNoisePlugin(localPlugin); }
+                    else if (EqualizerApo.NoisePlugin is { } old && File.Exists(old) && TryInstallNoisePlugin(old))
+                        Log("LOG reused the noise removal plugin from Equalizer APO's folder");
+                    else
+                    {
+                        Step(1, "RUN", "Downloading the noise removal plugin…");
+                        InstallNoisePlugin(Download(http, RnnoiseUrl, RnnoiseSha256, "win-rnnoise.zip", 1, "Downloading the noise removal plugin"));
+                    }
                 }
-                else
+                if (pluginList != null && File.Exists(pluginList))
                 {
-                    Step(1, "RUN", "Downloading the noise removal plugin…");
-                    InstallNoisePlugin(Download(http, RnnoiseUrl, RnnoiseSha256, "win-rnnoise.zip", 1, "Downloading the noise removal plugin"));
+                    Step(1, "RUN", "Moving your plugins…");
+                    MovePlugins(File.ReadAllLines(pluginList));
                 }
-                Step(1, "DONE", "Added");
+                Step(1, "DONE", pluginList != null ? "Moved" : "Added");
                 changed = true;
             }
 
-            // 3. Attach to the mic's endpoint slot
-            var guid = micGuid.Trim('{', '}');
-            bool attached() => UseEngine ? WaveFixEngine.IsAttached(guid) : EffectsEngine.GetSlot("x.{" + guid + "}") == EffectsEngine.SlotState.Endpoint;
+            // 3. Attach to the mic's endpoint effects (taking Equalizer APO off when switching)
+            bool attached() => WaveFixEngine.IsAttached(guid) && !EqualizerApo.IsOnMic("x.{" + guid + "}");
             if (attached()) Step(2, "SKIP", "Already connected");
             else
             {
-                Step(2, "RUN", UseEngine ? "Connecting the engine to your mic…" : "Connecting the effects to your mic…");
-                if (UseEngine) WaveFixEngine.BackupMic(guid);
-                else WriteChildBackup("{" + guid + "}");
-                RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\"" + (UseEngine ? " --engine" : ""));
+                Step(2, "RUN", Migrate ? "Switching your mic to WaveFix's engine…" : "Connecting the engine to your mic…");
+                WaveFixEngine.BackupMic(guid, fromEqualizerApo: EqualizerApo.IsOnMic("x.{" + guid + "}"));
+                RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\"" + (Migrate ? " --migrate" : ""));
                 if (!attached()) throw new InvalidOperationException("Windows didn't accept the mic setting.");
-                Step(2, "DONE", "Connected");
                 changed = true;
+                if (Migrate && EqualizerApo.Installed)
+                {
+                    if (EqualizerApo.UsedElsewhere(guid))
+                        Log("LOG Equalizer APO is still used by another device, so it was left installed");
+                    else
+                    {
+                        Step(2, "RUN", "Removing Equalizer APO…");
+                        EqualizerApo.Uninstall(m => Log($"LOG {m}"));
+                    }
+                }
+                Step(2, "DONE", Migrate ? (EqualizerApo.Installed ? "Switched (Equalizer APO kept for your other devices)" : "Switched") : "Connected");
             }
 
             // 4. Restart Windows Audio (only if something changed)
@@ -243,6 +226,23 @@ public static class Setup
             return 1;
         }
         finally { _log = null; try { Directory.Delete(WorkDir, true); } catch { } }
+    }
+
+    /// <summary>Copies plugins from the old shared folder into Program Files\WaveFix\Plugins (same file names).</summary>
+    static void MovePlugins(IEnumerable<string> sources)
+    {
+        var oldFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WaveFix", "Plugins");
+        Directory.CreateDirectory(WaveFixEngine.PluginDir);
+        foreach (var src in sources.Where(l => l.Length > 0))
+        {
+            var full = Path.GetFullPath(src);
+            // Only files from WaveFix's own old plugin folder, and only real 64-bit VST2 plugins.
+            if (!full.StartsWith(oldFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || !File.Exists(full))
+            { Log($"LOG skipped plugin {src}"); continue; }
+            if (PluginStore.Validate(full) is { } problem) { Log($"LOG skipped plugin {src}: {problem}"); continue; }
+            File.Copy(full, Path.Combine(WaveFixEngine.PluginDir, Path.GetFileName(full)), overwrite: true);
+            Log($"LOG moved plugin {Path.GetFileName(full)}");
+        }
     }
 
     /// <summary>
@@ -355,27 +355,10 @@ public static class Setup
         { throw new InvalidOperationException($"Couldn't copy the plugin into place ({ex.Message}). Antivirus may be blocking it."); }
     }
 
-    /// <summary>
-    /// Saves the mic's original effect settings where Equalizer APO keeps them (so it can chain the
-    /// original effects and restore them on uninstall), in the same format its Device Selector uses.
-    /// </summary>
-    static void WriteChildBackup(string guid)
+    static bool TryInstallNoisePlugin(string source)
     {
-        using var existing = Registry.LocalMachine.OpenSubKey($@"SOFTWARE\EqualizerAPO\Child APOs\{guid}");
-        if (existing != null) return; // already backed up (by Device Selector or an earlier setup)
-        using var fx = Registry.LocalMachine.OpenSubKey($@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{guid}\FxProperties");
-        using var key = Registry.LocalMachine.CreateSubKey($@"SOFTWARE\EqualizerAPO\Child APOs\{guid}");
-        foreach (var i in new[] { 1, 2, 5, 6, 7 })
-        {
-            var name = $"{FxClsid},{i}";
-            var v = fx?.GetValue(name) as string;
-            if (v != null && (v.Equals(EapoEfx, StringComparison.OrdinalIgnoreCase) || v.Equals(EapoSfx, StringComparison.OrdinalIgnoreCase))) v = null;
-            key.SetValue(name, v ?? "!VALUE");
-        }
-        key.SetValue("PreMixChild", "");
-        key.SetValue("PostMixChild", "");
-        key.SetValue("AllowSilentBufferModification", "false");
-        key.SetValue("Version", "2");
+        try { InstallNoisePlugin(source); return true; }
+        catch (Exception ex) { Log($"LOG couldn't reuse {source}: {ex.Message}"); return false; }
     }
 
     /// <summary>Runs this exe once as SYSTEM through a temporary scheduled task, then deletes the task.</summary>
@@ -433,7 +416,7 @@ public static class Setup
         {
             var guid = micGuid.Trim('{', '}');
             Log($"LOG WaveFix {Updater.Current} undo, mic {guid}");
-            RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\" --engine --undo");
+            RunAsSystem($"--system-attach {{{guid}}} \"{logPath}\" --undo");
             if (WaveFixEngine.IsAttached(guid)) throw new InvalidOperationException("Windows didn't accept the change.");
             WaveFixEngine.ForgetBackup(guid);
             RestartAudio();
@@ -502,10 +485,11 @@ public static class Setup
     // ======================= SYSTEM step (--system-attach) =======================
 
     /// <summary>
-    /// Puts Equalizer APO in the mic's endpoint effect slot (applied to every stream, including the
-    /// raw mode Discord uses). The key belongs to SYSTEM: grant write access, change, restore exactly.
+    /// Puts WaveFix's engine in the mic's endpoint effects (applied to every stream, including the
+    /// raw mode Discord uses), or takes it off (undo). When switching from Equalizer APO, takes that
+    /// off first. The key belongs to SYSTEM: grant write access, change, restore exactly.
     /// </summary>
-    public static int SystemAttach(string guid, string logPath, bool engine = false, bool undo = false)
+    public static int SystemAttach(string guid, string logPath, bool undo = false, bool migrate = false)
     {
         using var w = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
         var path = $@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{guid}\FxProperties";
@@ -527,22 +511,13 @@ public static class Setup
             acl.AddAccessRule(new RegistryAccessRule(WindowsIdentity.GetCurrent().User!, RegistryRights.SetValue | RegistryRights.QueryValues, AccessControlType.Allow));
             key.SetAccessControl(acl);
             using var wk = hklm.OpenSubKey(path, check, RegistryRights.SetValue | RegistryRights.QueryValues)!;
-            if (engine)
+            if (undo) WaveFixEngine.Detach(wk, guid);
+            else
             {
-                if (undo) WaveFixEngine.Detach(wk, guid);
-                else WaveFixEngine.Attach(wk);
-                w.WriteLine(undo ? "SYSTEM detach done" : "SYSTEM attach done");
-                return 0;
+                if (migrate) EqualizerApo.RemoveFromMic(wk, guid);
+                WaveFixEngine.Attach(wk);
             }
-            wk.SetValue($"{FxClsid},7", EapoEfx, RegistryValueKind.String);
-            wk.SetValue($"{FxModes},7", new[] { ModeDefault }, RegistryValueKind.MultiString);
-            // Remove Equalizer APO from the stream slot so nothing runs twice.
-            if (wk.GetValue($"{FxClsid},5") is string sfx && sfx.Equals(EapoSfx, StringComparison.OrdinalIgnoreCase))
-            {
-                wk.DeleteValue($"{FxClsid},5", false);
-                wk.DeleteValue($"{FxModes},5", false);
-            }
-            w.WriteLine("SYSTEM attach done");
+            w.WriteLine(undo ? "SYSTEM detach done" : "SYSTEM attach done");
             return 0;
         }
         catch (Exception ex) { w.WriteLine($"SYSTEM attach failed: {ex.Message}"); return 1; }

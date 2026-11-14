@@ -19,12 +19,12 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 
 ## New in this version
 
-- **WaveFix's own audio engine.** New installs no longer need Equalizer APO: WaveFix installs its own Windows audio effect, adds itself after any effects your mic already has, and only loads code from its admin-only folder. Already set up with Equalizer APO? Nothing changes for you. **Take the engine off this mic** on the Setup page puts your mic's original settings back.
-- **Soundboard:** long sounds (up to 15 minutes) now work, files that can't be added say why, and you can drag files or folders onto the page.
+- **No more Equalizer APO.** WaveFix runs everything on its own audio engine now. Set up with Equalizer APO before? After this update the Setup page offers **one click** that moves your mic, settings and plugins to WaveFix's engine, puts your mic's original effects back, and uninstalls Equalizer APO (unless another device still uses it). Until you click it, nothing changes.
+- **Take the engine off this mic** on the Setup page puts your mic's original Windows settings back.
 
 ## First-time setup is automatic
 
-Open WaveFix and click **Set it up for me**. After one Windows permission prompt it installs **WaveFix's audio engine** (setups from before 0.8 use **[Equalizer APO](https://sourceforge.net/projects/equalizerapo/)**), adds the **[RNNoise](https://github.com/werman/noise-suppression-for-voice)** noise removal plugin, connects the effects to your mic (in the slot Discord can't skip), and restarts Windows audio. Every download is checked against a pinned fingerprint. Steps already done are skipped.
+Open WaveFix and click **Set it up for me**. After one Windows permission prompt it installs **WaveFix's audio engine**, adds the **[RNNoise](https://github.com/werman/noise-suppression-for-voice)** noise removal plugin, connects the effects to your mic (in the slot Discord can't skip), and restarts Windows audio. Every download is checked against a pinned fingerprint. Steps already done are skipped.
 
 ## Verify the download
 

@@ -17,12 +17,14 @@ Any replacement that processes the mic inside a normal app and plays it to a vir
 
 ## The fix
 
-WaveFix runs its effects **inside the Windows audio engine** (`audiodg.exe`), as an Audio
-Processing Object on the physical mic. New installs use **WaveFix's own engine**
-(`native/wavefix-engine`, Rust); setups made before it existed keep using Equalizer APO, which is
-described below and works the same way.
+WaveFix never plays your mic itself. Its effects run **inside the Windows audio engine**
+(`audiodg.exe`), as an Audio Processing Object (APO) on the physical mic: **WaveFix's own engine**
+(`native/wavefix-engine`, Rust). Discord's process loopback can't record the audio engine, so
+there's nothing to leak. Discord, OBS and others use the physical mic (`Mic In (Elgato Wave:3)`)
+directly, with effects already applied. The WaveFix app is the control panel: it writes the
+engine's config and talks to the Windows audio APIs.
 
-### WaveFix engine (new installs)
+### How the engine works
 
 - `Program Files\WaveFix\Engine\wavefix-engine-<hash>.dll` is registered as a Windows audio effect
   (COM class `{1F0E0A0C-41EE-4E1A-B2C4-0681D5344BDD}`, registered like a driver's APO) and added **last**
@@ -39,16 +41,13 @@ described below and works the same way.
   (class factory, Initialize, format checks, LockForProcess, APOProcess) and checks the audio.
 - Written from Microsoft's documented APO interfaces; Equalizer APO (GPL) was only a reference.
 
-### Equalizer APO (setups from before the engine)
+### Coming from Equalizer APO
 
-WaveFix never plays your mic itself. Effects run **inside the Windows audio engine**
-(`audiodg.exe`) as an Audio Processing Object on the physical mic endpoint, via
-[Equalizer APO](https://sourceforge.net/projects/equalizerapo/). Discord's process loopback
-can't record the audio engine, so there's nothing to leak. Discord, OBS and others use the
-physical mic (`Mic In (Elgato Wave:3)`) directly, with effects already applied.
-
-WaveFix itself is a control panel that writes Equalizer APO config and talks to the Windows
-audio APIs.
+WaveFix 0.8.0 and older ran the effects through [Equalizer APO](https://sourceforge.net/projects/equalizerapo/).
+After updating, the Setup page offers one run that switches over: it installs the engine, moves
+RNNoise and your plugins into `Program Files\WaveFix\Plugins`, puts the mic's original effects back
+from Equalizer APO's own record, adds WaveFix's engine, and uninstalls Equalizer APO (unless another
+device still uses it). Your settings carry over.
 
 ## Features
 
@@ -66,18 +65,17 @@ audio APIs.
   a volume for others and optional "hear it myself". The app streams the mix to the plugin through
   a memory-mapped file (`C:\ProgramData\WaveFix\Engine\bridge.bin`, LOCAL SERVICE gets write
   access); it never plays the sound into the mic from an app, so nothing leaks into Discord streams
-- **WaveFix Voice FX:** voice polish and the voice changer are WaveFix's own VST2 plugin
-  (`native/wavefix-fx`, Rust, no SDK needed). It's embedded in WaveFix.exe and copied to
-  `C:\ProgramData\WaveFix\Engine` so Equalizer APO can load it inside the audio engine, which is
-  what keeps it out of Discord streams like the rest of the chain
+- **WaveFix Voice FX:** voice polish, the voice changer, the soundboard mixer and peak protection
+  (`native/wavefix-fx`, Rust), built into the engine. It's also a VST2 plugin, so other hosts can load it
 - **App mixer:** volume, mute and output device for each app playing sound
 - **Plugins:** add your own 64-bit VST2 effects to the mic chain, or **scan** the usual VST
   folders (and any folder you pick) for them; turn on/off, reorder, remove. They're copied to
-  `C:\ProgramData\WaveFix\Plugins` so the audio engine (LOCAL SERVICE) can load them
+  `C:\Program Files\WaveFix\Plugins` (one Windows permission prompt), the only place the engine
+  loads code from
 - **Plugin settings:** a Settings button on every plugin (and Adjust on noise removal) opens the
   plugin's own window, or sliders for plugins without one. Changes apply live: WaveFix hosts the
-  VST2 in a separate process, reads its state (`effGetChunk`, or parameters) and writes it into the
-  chain exactly like Equalizer APO's editor (`ChunkData "…"` or `"name" value` pairs). Reset
+  VST2 in a separate process, reads its state (`effGetChunk`, or parameters) and sends it to the
+  engine (a base64 chunk, or parameter name → value). Reset
   returns a plugin to its defaults
 - **Shortcuts:** system-wide hotkeys (work in games): mute toggle, push to talk, noise removal
   on/off, mic boost up/down, next voice tone, voice changer on/off, next voice, stop all sounds,
@@ -109,38 +107,28 @@ git tag v0.3.1 && git push origin v0.3.1
 
 ## Setup
 
-**Automatic:** open WaveFix and click **Set it up for me** (Setup tab, or the button on the
-status banner). After one UAC prompt, an admin helper (`WaveFix.exe --setup`) installs
-Equalizer APO 1.4.2 silently, extracts `rnnoise_mono.dll` from the RNNoise v1.10 release,
-saves Equalizer APO's child-APO backup for the mic, briefly runs `WaveFix.exe --system-attach`
-as SYSTEM through a temporary scheduled task to put Equalizer APO in the mic's endpoint slot,
-and restarts Windows Audio. Downloads are pinned by SHA-256 and kept in an admin-only folder
-until verified. Done steps are skipped.
+Open WaveFix and click **Set it up for me** (Setup tab, or the button on the status banner). After
+one UAC prompt, an admin helper (`WaveFix.exe --setup`):
 
-**Manual** (what the automatic setup does):
+1. installs WaveFix's engine into `Program Files\WaveFix\Engine` and registers it with Windows;
+2. extracts `rnnoise_mono.dll` from the RNNoise v1.10 release into `Program Files\WaveFix\Plugins`
+   (the download is pinned by SHA-256 and kept in an admin-only folder until verified);
+3. saves the mic's effect settings, then briefly runs `WaveFix.exe --system-attach` as SYSTEM (the
+   owner of those settings) through a temporary scheduled task to add the engine to the mic;
+4. restarts Windows Audio.
 
-1. Install [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) 1.4.2. In Device
-   Selector, tick only your physical mic on the **Capture devices** tab.
-2. Put `rnnoise_mono.dll` from the RNNoise release's `vst` folder in
-   `C:\Program Files\EqualizerAPO\VSTPlugins\rnnoise\`.
-3. Move Equalizer APO to the mic's **endpoint** slot so raw-mode apps (Discord's default audio
-   subsystem) get the effects too. From an admin PowerShell:
-   `tools\run-as-system.ps1` (pass `-Undo` to revert). Edit the endpoint GUID in
-   `tools\set-mic-effect-slot.ps1` if your mic isn't the one it targets.
-4. Restart Windows Audio (or reboot).
-5. Install WaveFix (above), or build it yourself: `dotnet run -c Release --project src\WaveFix`
-   (needs the .NET 8 SDK, plus [Rust](https://rustup.rs) for the voice effects; without Rust it
-   builds without them). Close Wave Link.
+Done steps are skipped. To build it yourself: `dotnet run -c Release --project src\WaveFix` (needs
+the .NET 8 SDK and [Rust](https://rustup.rs) for the engine). Close Wave Link.
 
 In Discord, OBS and other apps, select the physical mic (e.g. `Mic In (Elgato Wave:3)`),
 not any `Elgato Virtual Audio` device.
 
 ## Why the endpoint slot
 
-Windows has three effect slots on a capture device. Equalizer APO's Device Selector uses the
-stream slot (SFX), which Windows skips for apps that open the mic in raw mode, and Discord's
-Standard audio subsystem does. The endpoint slot (EFX) is applied to every stream, raw
-included. `tools/mic-level.ps1 -Raw` shows the difference.
+Windows has three effect slots on a capture device. The stream slot (SFX) is skipped for apps
+that open the mic in raw mode, and Discord's Standard audio subsystem does. The endpoint slot
+(EFX) is applied to every stream, raw included, so that's where WaveFix's engine goes.
+`tools/mic-level.ps1 -Raw` shows the difference.
 
 ## Known limits
 
@@ -154,5 +142,4 @@ included. `tools/mic-level.ps1 -Raw` shows the difference.
   silence; Wave Link carries your voice.
 - `tools/mic-level.ps1 [-Raw] [-Comms] [-LowLatency]`: record the mic the way different apps
   open it and print the levels, to check which modes get the effects.
-- `tools/run-as-system.ps1 [-Undo]` + `tools/set-mic-effect-slot.ps1`: move Equalizer APO to
-  the mic's endpoint slot (see above).
+
