@@ -19,6 +19,7 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 
 ## New in this version
 
+- **Copy details for help** works even when another program is using the clipboard: WaveFix keeps trying for a moment, then saves the details as "WaveFix details.txt" on your Desktop and opens it.
 - **Important fix:** WaveFix's audio engine didn't actually run on your mic, so effects, boost and the soundboard had no effect, and on some mics recording stopped working altogether. Windows creates audio effects in a way the engine didn't support; it does now. After updating, WaveFix shows **Update the audio engine**: click **Set it up for me** once (one Windows permission prompt) and your effects reach the mic.
 - The Setup page now always stays in the sidebar, with **Copy details for help** and **Take the engine off this mic**.
 - **Copy details for help** (Setup page): copies what WaveFix and Windows report about your mic and the audio engine, including the engine's own log, to paste when something doesn't work.

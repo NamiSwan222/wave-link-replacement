@@ -445,20 +445,39 @@ public partial class MainWindow : Window
     void OpenPluginPage_Click(object sender, RoutedEventArgs e) =>
         Process.Start(new ProcessStartInfo(Setup.RnnoiseReleasePage) { UseShellExecute = true });
 
-    void CopySetupLog_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            Clipboard.SetText(Diagnostics.Collect(Mic.DeviceId));
-            CopyLogText.Text = "Copied!";
-        }
-        catch { CopyLogText.Text = "Couldn't copy"; }
-    }
+    void CopySetupLog_Click(object sender, RoutedEventArgs e) =>
+        CopyLogText.Text = ShareDetails() ? "Copied!" : "Saved to your Desktop";
 
     void CopyDiagnostics_Click(object sender, RoutedEventArgs e)
     {
-        try { Clipboard.SetText(Diagnostics.Collect(Mic.DeviceId)); Osd.Show(this, "\uE8C8", "Details copied: paste them in a message"); }
-        catch (Exception ex) { MessageBox.Show(this, $"Couldn't copy: {ex.Message}", "WaveFix"); }
+        if (ShareDetails()) Osd.Show(this, "", "Details copied: paste them in a message");
+    }
+
+    /// <summary>
+    /// Copies the details for help. Another program can hold the clipboard for a moment (clipboard
+    /// managers, remote desktop, overlays): keep trying for about a second, and if it's still busy,
+    /// save them as a file on the Desktop and open it. True if they went to the clipboard.
+    /// </summary>
+    bool ShareDetails()
+    {
+        var text = Diagnostics.Collect(Mic.DeviceId);
+        for (int i = 0; i < 10; i++)
+        {
+            try { Clipboard.SetDataObject(text, true); return true; }
+            catch (System.Runtime.InteropServices.COMException) { Thread.Sleep(100); }
+            catch (System.Runtime.InteropServices.ExternalException) { Thread.Sleep(100); }
+        }
+        try
+        {
+            var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            var file = Path.Combine(Directory.Exists(desktop) ? desktop : Path.GetTempPath(), "WaveFix details.txt");
+            File.WriteAllText(file, text);
+            Process.Start(new ProcessStartInfo("notepad.exe", $"\"{file}\"") { UseShellExecute = true });
+            MessageBox.Show(this, $"Another program is using the clipboard, so the details were saved to a file instead:\n\n{file}\n\nSend that file (it's open in Notepad), or copy its text from there.",
+                "WaveFix", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex) { MessageBox.Show(this, $"Couldn't copy or save the details: {ex.Message}", "WaveFix"); }
+        return false;
     }
 
     void ShowSetupResult(bool good, string text, bool showHelp = false, bool pluginHelp = false)
