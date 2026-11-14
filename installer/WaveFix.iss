@@ -64,6 +64,9 @@ Filename: "{app}\WaveFix.exe"; Parameters: "--updated"; Flags: nowait; Check: Is
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /IM WaveFix.exe /F"; Flags: runhidden; RunOnceId: "StopWaveFix"
+; Takes WaveFix's audio engine off every mic (original effects back) and removes it from
+; Program Files. It's machine-wide, so Windows asks for permission once.
+Filename: "{app}\WaveFix.exe"; Parameters: "--uninstall"; Flags: waituntilterminated; RunOnceId: "RemoveEngine"
 
 [Code]
 function IsUpdate: Boolean;

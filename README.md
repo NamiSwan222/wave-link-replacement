@@ -39,6 +39,12 @@ engine's config and talks to the Windows audio APIs.
   audio through WaveFix. An engine update asks for permission once, too.
 - `cargo test` in `native/wavefix-engine` loads the built DLL the way Windows' audio service does
   (class factory, Initialize, format checks, LockForProcess, APOProcess) and checks the audio.
+- **Test my effects** (Setup page) records from the mic for a moment and checks the engine's report:
+  working, not running on this mic (some drivers never run effects), damaged effect settings, or
+  the mic can't be opened. It adds no sound. **Copy details for help** collects everything, including
+  the engine's events from the Application log (source "WaveFix Engine").
+- Uninstalling WaveFix, or **Remove the WaveFix engine**, takes the engine off every mic (original
+  settings back), unregisters it and deletes `Program Files\WaveFix` (one permission prompt).
 - Written from Microsoft's documented APO interfaces; Equalizer APO (GPL) was only a reference.
 
 ### Coming from Equalizer APO

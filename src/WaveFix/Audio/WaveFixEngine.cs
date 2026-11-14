@@ -207,6 +207,47 @@ public static class WaveFixEngine
     static bool IsUs(string clsid) => string.Equals(clsid.Trim(), Clsid, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// A real effect class ID. Equalizer APO's backups use markers like "!VALUE" and "!KEY" for
+    /// "nothing was here"; if one of those ends up in a mic's settings, Windows can't load the
+    /// mic's effects at all (ours included). The all-zero GUID also means "none".
+    /// </summary>
+    public static bool IsRealEffect(string? clsid) =>
+        clsid != null && Guid.TryParse(clsid.Trim(), out var g) && g != Guid.Empty;
+
+    /// <summary>The effect slots (single and composite) that hold effect class IDs.</summary>
+    static readonly int[] SingleSlots = { 1, 2, 5, 6, 7 }, CompositeSlots = { 13, 14, 15 };
+
+    /// <summary>This mic's effect settings contain something that isn't an effect (see IsRealEffect).</summary>
+    public static bool HasJunk(string endpointId)
+    {
+        try
+        {
+            using var k = Hklm.OpenSubKey(FxPath(Name(endpointId)));
+            if (k == null) return false;
+            return SingleSlots.Any(i => k.GetValue($"{FxClsid},{i}") is string s && !IsRealEffect(s) && !IsNone(s))
+                || CompositeSlots.Any(i => k.GetValue($"{FxClsid},{i}") is string[] l && l.Any(c => !IsRealEffect(c)));
+        }
+        catch { return false; }
+    }
+
+    /// <summary>An explicit "no effect" (all-zero GUID) in a single slot: valid, nothing to clean.</summary>
+    static bool IsNone(string s) => Guid.TryParse(s.Trim(), out var g) && g == Guid.Empty;
+
+    /// <summary>SYSTEM step: removes entries that aren't effects from a mic's effect settings.</summary>
+    public static void RemoveJunk(RegistryKey fx)
+    {
+        foreach (var i in SingleSlots)
+            if (fx.GetValue($"{FxClsid},{i}") is string s && !IsRealEffect(s) && !IsNone(s)) fx.DeleteValue($"{FxClsid},{i}", false);
+        foreach (var i in CompositeSlots)
+            if (fx.GetValue($"{FxClsid},{i}") is string[] l && l.Any(c => !IsRealEffect(c)))
+            {
+                var rest = l.Where(IsRealEffect).ToArray();
+                if (rest.Length > 0) fx.SetValue($"{FxClsid},{i}", rest, RegistryValueKind.MultiString);
+                else fx.DeleteValue($"{FxClsid},{i}", false);
+            }
+    }
+
+    /// <summary>
     /// Saves the mic's original effect settings before the first change (admin helper). When the
     /// mic still has Equalizer APO on it, the original endpoint effect comes from Equalizer APO's
     /// own record, so undo never puts Equalizer APO back.
@@ -222,6 +263,12 @@ public static class WaveFixEngine
             var v = fx?.GetValue(name);
             if (fromEqualizerApo && name == $"{FxClsid},{Efx}") v = EqualizerApo.OriginalEndpointEffect(guid);
             if (fromEqualizerApo && v is string[] list) v = list.Where(c => !c.Trim().Equals("{EC1CC9CE-FAED-4822-828A-82A81A6F018F}", StringComparison.OrdinalIgnoreCase)).ToArray() is { Length: > 0 } rest ? rest : null;
+            // Never save junk (e.g. Equalizer APO's "!KEY" marker) as an "original" effect.
+            if (name != $"{FxModes},{Efx}")
+            {
+                if (v is string one && !IsRealEffect(one)) v = null;
+                if (v is string[] many) v = many.Where(IsRealEffect).ToArray() is { Length: > 0 } real ? real : null;
+            }
             if (v is string s) key.SetValue(name, s, RegistryValueKind.String);
             else if (v is string[] m) key.SetValue(name, m, RegistryValueKind.MultiString);
             else key.SetValue(name + " (none)", 1, RegistryValueKind.DWord);
@@ -235,11 +282,12 @@ public static class WaveFixEngine
     /// </summary>
     public static void Attach(RegistryKey fx)
     {
+        RemoveJunk(fx);
         var composite = fx.GetValue($"{FxClsid},{CompositeEfx}") as string[];
         var single = fx.GetValue($"{FxClsid},{Efx}") as string;
         var list = new List<string>();
         if (composite != null) list.AddRange(composite.Where(c => !string.IsNullOrWhiteSpace(c)));
-        else if (!string.IsNullOrWhiteSpace(single) && !single.Trim('{', '}').All(c => c is '0' or '-')) list.Add(single);
+        else if (IsRealEffect(single)) list.Add(single!);
         list.RemoveAll(IsUs);
         list.Add(Clsid);
         fx.SetValue($"{FxClsid},{CompositeEfx}", list.ToArray(), RegistryValueKind.MultiString);
@@ -265,9 +313,66 @@ public static class WaveFixEngine
         foreach (var name in new[] { $"{FxClsid},{Efx}", $"{FxClsid},{CompositeEfx}", $"{FxModes},{Efx}" })
         {
             var v = backup.GetValue(name);
-            if (v is string s) fx.SetValue(name, s, RegistryValueKind.String);
-            else if (v is string[] m) fx.SetValue(name, m, RegistryValueKind.MultiString);
+            bool effect = name != $"{FxModes},{Efx}";
+            if (v is string s && (!effect || IsRealEffect(s))) fx.SetValue(name, s, RegistryValueKind.String);
+            else if (v is string[] m && (!effect || m.Any(IsRealEffect))) fx.SetValue(name, effect ? m.Where(IsRealEffect).ToArray() : m, RegistryValueKind.MultiString);
             else fx.DeleteValue(name, false);
+        }
+        RemoveJunk(fx);
+    }
+
+    /// <summary>Every mic (capture endpoint GUID, with braces) that has the engine in its effects.</summary>
+    public static List<string> AttachedMics()
+    {
+        var list = new List<string>();
+        try
+        {
+            using var capture = Hklm.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture");
+            foreach (var id in capture?.GetSubKeyNames() ?? Array.Empty<string>())
+                if (IsAttached(id)) list.Add(id);
+        }
+        catch { }
+        return list;
+    }
+
+    /// <summary>Removes the engine's registration, event source and mic backups (admin helper).</summary>
+    public static void Unregister(Action<string> log)
+    {
+        foreach (var key in new[]
+        {
+            $@"SOFTWARE\Classes\CLSID\{Clsid}",
+            $@"SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\{Clsid}",
+            @"SYSTEM\CurrentControlSet\Services\EventLog\Application\WaveFix Engine",
+            @"SOFTWARE\WaveFix",
+        })
+        {
+            try { Hklm.DeleteSubKeyTree(key, false); log($"removed {key}"); }
+            catch (Exception ex) { log($"couldn't remove {key}: {ex.Message}"); }
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    static extern bool MoveFileEx(string existing, string? replacement, int flags);
+    const int MOVEFILE_DELAY_UNTIL_REBOOT = 4;
+
+    /// <summary>
+    /// Deletes Program Files\WaveFix and WaveFix's data in ProgramData. Files Windows audio still
+    /// has open are deleted at the next restart instead.
+    /// </summary>
+    public static void DeleteFiles(Action<string> log)
+    {
+        var data = Path.GetDirectoryName(DataDir)!; // ProgramData\WaveFix
+        foreach (var dir in new[] { InstallDir, data })
+        {
+            if (!Directory.Exists(dir)) continue;
+            // Only ever WaveFix's own folders.
+            if (!Path.GetFileName(Path.TrimEndingDirectorySeparator(dir)).Equals("WaveFix", StringComparison.OrdinalIgnoreCase)) continue;
+            try { Directory.Delete(dir, true); log($"deleted {dir}"); continue; }
+            catch (Exception ex) { log($"{dir}: {ex.Message}; the rest is deleted at the next restart"); }
+            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                try { File.Delete(f); } catch { MoveFileEx(f, null, MOVEFILE_DELAY_UNTIL_REBOOT); }
+            foreach (var d in Directory.EnumerateDirectories(dir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length).Append(dir))
+                try { Directory.Delete(d); } catch { MoveFileEx(d, null, MOVEFILE_DELAY_UNTIL_REBOOT); }
         }
     }
 
@@ -331,7 +436,7 @@ public static class WaveFixEngine
         File.Move(tmp, path, overwrite: true); // the engine never sees a half-written file
     }
 
-    public sealed record Status(bool Running, string[] Warnings);
+    public sealed record Status(bool Running, string[] Warnings, long Time = 0, int Channels = 0, double Rate = 0);
 
     /// <summary>What the engine last reported for this mic (it reports while the mic is in use).</summary>
     public static Status? ReadStatus(string endpointId)
@@ -342,7 +447,7 @@ public static class WaveFixEngine
             var time = json?["time"]?.GetValue<long>() ?? 0;
             bool fresh = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - time < 15;
             var warnings = json?["warnings"]?.AsArray().Select(w => w?.GetValue<string>() ?? "").Where(w => w.Length > 0).ToArray() ?? Array.Empty<string>();
-            return new Status(fresh, warnings);
+            return new Status(fresh, warnings, time, json?["channels"]?.GetValue<int>() ?? 0, json?["rate"]?.GetValue<double>() ?? 0);
         }
         catch { return null; }
     }

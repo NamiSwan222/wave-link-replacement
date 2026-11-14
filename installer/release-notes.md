@@ -19,6 +19,9 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 
 ## New in this version
 
+- **Fix:** switching from Equalizer APO could leave "!KEY" entries in your mic's effect settings, which stopped Windows from running any of the mic's effects. WaveFix now shows the mic as not set up: click **Set it up for me** once to repair it.
+- **Test my effects** (Setup page): records from your mic for a moment and tells you whether WaveFix's engine is running on it, and what to do if not. It adds no sound, and runs by itself after setup.
+- **Clean uninstall:** uninstalling WaveFix (or **Remove the WaveFix engine** on the Setup page) takes the engine off every mic, puts their original settings back and deletes it from Program Files (one Windows permission prompt).
 - **Copy details for help** works even when another program is using the clipboard: WaveFix keeps trying for a moment, then saves the details as "WaveFix details.txt" on your Desktop and opens it.
 - **Important fix:** WaveFix's audio engine didn't actually run on your mic, so effects, boost and the soundboard had no effect, and on some mics recording stopped working altogether. Windows creates audio effects in a way the engine didn't support; it does now. After updating, WaveFix shows **Update the audio engine**: click **Set it up for me** once (one Windows permission prompt) and your effects reach the mic.
 - The Setup page now always stays in the sidebar, with **Copy details for help** and **Take the engine off this mic**.

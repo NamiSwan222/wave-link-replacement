@@ -319,6 +319,41 @@ public partial class MainWindow : Window
         ChooseEngine();
     }
 
+    async void TestEffects_Click(object sender, RoutedEventArgs e) => await RunEffectsTest(afterSetup: false);
+
+    /// <summary>Records from the mic for a moment and shows whether the engine is running on it.</summary>
+    async Task RunEffectsTest(bool afterSetup)
+    {
+        if (Mic.DeviceId is not { } mic) return;
+        TestEffectsButton.IsEnabled = false;
+        TestEffectsText.Text = "Testing…";
+        EngineCheck.Result r;
+        try { r = await EngineCheck.RunAsync(mic); }
+        catch (Exception ex) { r = new EngineCheck.Result(false, "The test didn't finish", ex.Message, false); }
+        TestEffectsButton.IsEnabled = true;
+        TestEffectsText.Text = "Test my effects";
+        ChangeLog.Write($"Effects test on {mic}: {r.Title}");
+        var text = r.Good && afterSetup ? $"All done! {r.Detail} Head to Microphone to tune your sound." : $"{r.Title}. {r.Detail}";
+        if (r.OfferTakeOff) text += " Use Take the engine off this mic below to undo it.";
+        _setupShowsResult = true;
+        ShowSetupResult(r.Good, text, showHelp: !r.Good);
+    }
+
+    async void RemoveEngine_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this, "Remove WaveFix's audio engine from this PC? Every mic it's on gets its original Windows effect settings back, and your WaveFix effects stop working until you set it up again. Your sound drops for a few seconds while Windows audio restarts.",
+                "WaveFix", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+        RemoveEngineButton.IsEnabled = false;
+        bool ok = await Setup.RemoveEngineAsync();
+        RemoveEngineButton.IsEnabled = true;
+        ChangeLog.Write($"Engine removed: {(ok ? "done" : "failed or declined")}");
+        _setupShowsResult = false;
+        RefreshSetupChecklist();
+        UpdateStatus();
+        ShowSetupResult(ok, ok ? "Done. WaveFix's engine is removed and your mics are back to their original settings. Some files go at the next restart if Windows was still using them."
+            : "That didn't finish (or permission was declined).", showHelp: !ok);
+    }
+
     async void UndoSetup_Click(object sender, RoutedEventArgs e)
     {
         if (Mic.DeviceId is not { } mic) return;
@@ -368,6 +403,7 @@ public partial class MainWindow : Window
         SetupButtonText.Text = complete ? "Everything's set up" : "Set it up for me";
         SetupButton.IsEnabled = !complete;
         UndoSetupButton.Visibility = !Setup.Migrate && WaveFixEngine.IsAttached(Mic.DeviceId) ? Visibility.Visible : Visibility.Collapsed;
+        RemoveEngineButton.Visibility = Setup.EngineLeftovers ? Visibility.Visible : Visibility.Collapsed;
     }
 
     void RunSetup_Click(object sender, RoutedEventArgs e) => _ = RunSetup(null);
@@ -416,7 +452,8 @@ public partial class MainWindow : Window
             else if (_settings.Engine != "wavefix") { _settings.Engine = "wavefix"; _settings.Save(); }
             _settings.MicDeviceId = micId;
             ApplyEffects(); // write the effect chain for this mic now that the engine is in place
-            ShowSetupResult(true, "All done! Your effects now work in Discord, OBS and every other app. Head to Microphone to tune your sound.");
+            ShowSetupResult(true, "All done! Checking that your effects reach the mic…");
+            await RunEffectsTest(afterSetup: true);
             SetupButtonText.Text = "Everything's set up";
             SetupButton.IsEnabled = false;
         }

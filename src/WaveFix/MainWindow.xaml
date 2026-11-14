@@ -148,17 +148,32 @@
                                         <TextBlock x:Name="SetupButtonText" Text="Set it up for me" FontWeight="Bold" FontSize="14.5" Foreground="White" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
-                                <Button x:Name="UndoSetupButton" Style="{StaticResource LinkButton}" Margin="16,0,0,0" VerticalAlignment="Center" Click="UndoSetup_Click"
+                                <Button x:Name="TestEffectsButton" Style="{StaticResource SoftButton}" Height="48" Padding="18,0" Margin="10,0,0,0" Click="TestEffects_Click"
+                                        AutomationProperties.Name="Test my effects"
+                                        ToolTip="Records from this mic for a moment and checks that WaveFix's engine is running on it. Adds no sound.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE9D9;" Style="{StaticResource Icon}" FontSize="14" Margin="0,0,10,0"/>
+                                        <TextBlock x:Name="TestEffectsText" Text="Test my effects" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                            <WrapPanel Margin="2,12,0,0">
+                                <Button x:Name="UndoSetupButton" Style="{StaticResource LinkButton}" Margin="0,0,18,4" VerticalAlignment="Center" Click="UndoSetup_Click"
                                         Visibility="Collapsed" AutomationProperties.Name="Take WaveFix's engine off this mic"
                                         ToolTip="Puts this mic's original Windows effect settings back (one permission prompt).">
                                     <TextBlock Text="Take the engine off this mic" FontSize="12.5" Foreground="{StaticResource SubText}"/>
                                 </Button>
-                                <Button Style="{StaticResource LinkButton}" Margin="16,0,0,0" VerticalAlignment="Center" Click="CopyDiagnostics_Click"
+                                <Button Style="{StaticResource LinkButton}" Margin="0,0,18,4" VerticalAlignment="Center" Click="CopyDiagnostics_Click"
                                         AutomationProperties.Name="Copy details for help"
                                         ToolTip="Copies what WaveFix and Windows report about your mic and the engine, to paste when asking for help.">
                                     <TextBlock Text="Copy details for help" FontSize="12.5" Foreground="{StaticResource SubText}"/>
                                 </Button>
-                            </StackPanel>
+                                <Button x:Name="RemoveEngineButton" Style="{StaticResource LinkButton}" Margin="0,0,18,4" VerticalAlignment="Center" Click="RemoveEngine_Click"
+                                        Visibility="Collapsed" AutomationProperties.Name="Remove the WaveFix engine"
+                                        ToolTip="Takes WaveFix's engine off every mic (their original settings come back) and deletes it from Program Files.">
+                                    <TextBlock Text="Remove the WaveFix engine" FontSize="12.5" Foreground="{StaticResource SubText}"/>
+                                </Button>
+                            </WrapPanel>
                         </StackPanel>
                     </Border>
 

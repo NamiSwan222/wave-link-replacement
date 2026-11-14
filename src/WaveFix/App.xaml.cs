@@ -26,6 +26,13 @@ public partial class App : Application
             Shutdown(Setup.RunElevated(e.Args[1], e.Args[2], plugin, list));
             return;
         }
+        if (e.Args.Length >= 2 && e.Args[0] == "--remove-engine") { Shutdown(Setup.RunRemoveElevated(e.Args[1])); return; }
+        if (e.Args.Length >= 1 && e.Args[0] == "--uninstall")
+        {
+            // Run by the uninstaller: take the engine off every mic and remove it (one UAC prompt).
+            Shutdown(Setup.EngineLeftovers && !Setup.RemoveEngineAsync().GetAwaiter().GetResult() ? 1 : 0);
+            return;
+        }
         if (e.Args.Length >= 3 && e.Args[0] == "--setup-undo") { Shutdown(Setup.RunUndoElevated(e.Args[1], e.Args[2])); return; }
         if (e.Args.Length >= 4 && e.Args[0] == "--plugin-install") { Shutdown(Setup.PluginInstall(e.Args[1], e.Args[2], e.Args[3])); return; }
         if (e.Args.Length >= 4 && e.Args[0] == "--edit-plugin") { PluginEditor.Run(this, e.Args[1], e.Args[2], e.Args[3]); return; }

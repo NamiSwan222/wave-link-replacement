@@ -35,7 +35,7 @@ public sealed class EffectsEngine
     public string NoisePlugin => WaveFixEngine.NoisePlugin;
 
     /// <summary>The engine is in this mic's endpoint effects (applied to every stream, raw mode included).</summary>
-    public bool IsConnected(string endpointId) => WaveFixEngine.IsAttached(endpointId);
+    public bool IsConnected(string endpointId) => WaveFixEngine.IsAttached(endpointId) && !WaveFixEngine.HasJunk(endpointId);
 
     public void Apply(AppSettings s, string micEndpointId)
     {

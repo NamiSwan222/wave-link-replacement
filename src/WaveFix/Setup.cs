@@ -71,7 +71,7 @@ public static class Setup
     {
         WaveFixEngine.IsInstalled && !WaveFixEngine.NeedsUpdate,
         File.Exists(NoisePlugin) && !Migrate,
-        WaveFixEngine.IsAttached(endpointId) && !EqualizerApo.IsOnMic(endpointId),
+        WaveFixEngine.IsAttached(endpointId) && !EqualizerApo.IsOnMic(endpointId) && !WaveFixEngine.HasJunk(endpointId),
         false,
     };
 
@@ -185,7 +185,9 @@ public static class Setup
             }
 
             // 3. Attach to the mic's endpoint effects (taking Equalizer APO off when switching)
-            bool attached() => WaveFixEngine.IsAttached(guid) && !EqualizerApo.IsOnMic("x.{" + guid + "}");
+            // Also redone when the mic's settings hold junk (e.g. "!KEY" from an Equalizer APO backup),
+            // which stops Windows from running any of the mic's effects.
+            bool attached() => WaveFixEngine.IsAttached(guid) && !EqualizerApo.IsOnMic("x.{" + guid + "}") && !WaveFixEngine.HasJunk(guid);
             if (attached()) Step(2, "SKIP", "Already connected");
             else
             {
@@ -556,43 +558,25 @@ public static class Setup
         Say($"LOG SYSTEM step started as {WindowsIdentity.GetCurrent().Name} ({(undo ? "undo" : migrate ? "switch" : "attach")})");
         try
         {
-            var path = $@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{guid}\FxProperties";
-            using var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-            var check = RegistryKeyPermissionCheck.ReadWriteSubTree;
-            RegistryKey? key = hklm.OpenSubKey(path, check, RegistryRights.ReadPermissions | RegistryRights.ChangePermissions);
-            if (key == null)
+            if (guid == "ALL" && undo)
             {
-                // Some mics have no FxProperties yet: create it (SYSTEM can).
-                using var parent = hklm.OpenSubKey(Path.GetDirectoryName(path)!, check, RegistryRights.CreateSubKey | RegistryRights.ReadKey);
-                parent?.CreateSubKey("FxProperties")?.Dispose();
-                key = hklm.OpenSubKey(path, check, RegistryRights.ReadPermissions | RegistryRights.ChangePermissions);
-            }
-            if (key == null) throw new InvalidOperationException("couldn't open the mic's settings");
-            using (key)
-            {
-                var acl = key.GetAccessControl();
-                var original = acl.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
-                try
+                // Removing WaveFix: every mic that has the engine gets its original effects back.
+                foreach (var g in WaveFixEngine.AttachedMics())
                 {
-                    acl.AddAccessRule(new RegistryAccessRule(WindowsIdentity.GetCurrent().User!, RegistryRights.SetValue | RegistryRights.QueryValues, AccessControlType.Allow));
-                    key.SetAccessControl(acl);
-                    using var wk = hklm.OpenSubKey(path, check, RegistryRights.SetValue | RegistryRights.QueryValues)
-                        ?? throw new InvalidOperationException("couldn't get write access to the mic's settings");
+                    EditMicFx(g, wk => WaveFixEngine.Detach(wk, g));
+                    Say($"LOG SYSTEM: engine taken off {g}");
+                }
+            }
+            else
+                EditMicFx(guid, wk =>
+                {
                     if (undo) WaveFixEngine.Detach(wk, guid);
                     else
                     {
                         if (migrate) EqualizerApo.RemoveFromMic(wk, guid);
                         WaveFixEngine.Attach(wk);
                     }
-                }
-                finally
-                {
-                    // Put the key's permissions back exactly as they were.
-                    var restore = key.GetAccessControl();
-                    restore.SetSecurityDescriptorSddlForm(original, AccessControlSections.Access);
-                    key.SetAccessControl(restore);
-                }
-            }
+                });
             Say(undo ? "LOG SYSTEM detach done" : "LOG SYSTEM attach done");
             Result("OK");
             return 0;
@@ -604,5 +588,93 @@ public static class Setup
             return 1;
         }
         finally { w?.Dispose(); }
+    }
+
+    /// <summary>
+    /// SYSTEM: opens a mic's effect settings (owned by SYSTEM), grants itself write access, runs
+    /// <paramref name="edit"/>, and puts the key's permissions back exactly as they were.
+    /// </summary>
+    static void EditMicFx(string guid, Action<RegistryKey> edit)
+    {
+        var path = $@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture\{{{guid.Trim('{', '}')}}}\FxProperties";
+        using var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        var check = RegistryKeyPermissionCheck.ReadWriteSubTree;
+        RegistryKey? key = hklm.OpenSubKey(path, check, RegistryRights.ReadPermissions | RegistryRights.ChangePermissions);
+        if (key == null)
+        {
+            // Some mics have no FxProperties yet: create it (SYSTEM can).
+            using var parent = hklm.OpenSubKey(Path.GetDirectoryName(path)!, check, RegistryRights.CreateSubKey | RegistryRights.ReadKey);
+            parent?.CreateSubKey("FxProperties")?.Dispose();
+            key = hklm.OpenSubKey(path, check, RegistryRights.ReadPermissions | RegistryRights.ChangePermissions);
+        }
+        if (key == null) throw new InvalidOperationException("couldn't open the mic's settings");
+        using (key)
+        {
+            var acl = key.GetAccessControl();
+            var original = acl.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+            try
+            {
+                acl.AddAccessRule(new RegistryAccessRule(WindowsIdentity.GetCurrent().User!, RegistryRights.SetValue | RegistryRights.QueryValues, AccessControlType.Allow));
+                key.SetAccessControl(acl);
+                using var wk = hklm.OpenSubKey(path, check, RegistryRights.SetValue | RegistryRights.QueryValues)
+                    ?? throw new InvalidOperationException("couldn't get write access to the mic's settings");
+                edit(wk);
+            }
+            finally
+            {
+                var restore = key.GetAccessControl();
+                restore.SetSecurityDescriptorSddlForm(original, AccessControlSections.Access);
+                key.SetAccessControl(restore);
+            }
+        }
+    }
+
+    // ======================= Removing the engine (uninstall, or the Setup page link) =======================
+
+    /// <summary>Anything of the engine is on this PC (registered, files, or on a mic).</summary>
+    public static bool EngineLeftovers =>
+        WaveFixEngine.RegisteredPath != null || Directory.Exists(WaveFixEngine.InstallDir) || WaveFixEngine.AttachedMics().Count > 0;
+
+    /// <summary>Starts the admin helper that removes the engine everywhere (one UAC prompt).</summary>
+    public static async Task<bool> RemoveEngineAsync()
+    {
+        var log = LastLogPath;
+        try { Directory.CreateDirectory(Path.GetDirectoryName(log)!); File.WriteAllText(log, ""); } catch { }
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--remove-engine \"{log}\"")
+            { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden });
+            if (p == null) return false;
+            await p.WaitForExitAsync();
+            return p.ExitCode == 0;
+        }
+        catch (System.ComponentModel.Win32Exception) { return false; } // UAC "No"
+    }
+
+    /// <summary>
+    /// Admin helper: takes the engine off every mic (original effects back), unregisters it,
+    /// restarts Windows audio so it lets go of the DLL, and deletes WaveFix's files.
+    /// </summary>
+    public static int RunRemoveElevated(string logPath)
+    {
+        using var w = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
+        _log = w;
+        try
+        {
+            Log($"LOG WaveFix {Updater.Current} removing the audio engine");
+            if (WaveFixEngine.AttachedMics().Count > 0)
+            {
+                var result = RunAsSystem($"--system-attach ALL \"{logPath}\" --undo");
+                var left = WaveFixEngine.AttachedMics();
+                if (left.Count > 0) throw new InvalidOperationException($"the engine is still on {left.Count} mic(s): {result}");
+            }
+            WaveFixEngine.Unregister(m => Log($"LOG {m}"));
+            RestartAudio();
+            WaveFixEngine.DeleteFiles(m => Log($"LOG {m}"));
+            Log("RESULT OK");
+            return 0;
+        }
+        catch (Exception ex) { Log($"LOG {ex}"); Log("RESULT FAIL"); return 1; }
+        finally { _log = null; }
     }
 }

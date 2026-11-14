@@ -88,7 +88,7 @@ public static class EqualizerApo
     public static string? OriginalEndpointEffect(string guid)
     {
         using var child = ChildBackup(guid);
-        return child?.GetValue($"{FxClsid},7") is string v && v != "!VALUE" && !IsEapo(v) ? v : null;
+        return child?.GetValue($"{FxClsid},7") is string v && WaveFixEngine.IsRealEffect(v) && !IsEapo(v) ? v : null;
     }
 
     /// <summary>
@@ -110,7 +110,8 @@ public static class EqualizerApo
             var original = child?.GetValue(name) as string;
             if (child != null && original != null)
             {
-                if (original == "!VALUE" || IsEapo(original)) fx.DeleteValue(name, false);
+                // Equalizer APO marks "nothing here" with "!VALUE" or "!KEY": anything that isn't a real effect ID.
+                if (!WaveFixEngine.IsRealEffect(original) || IsEapo(original)) fx.DeleteValue(name, false);
                 else fx.SetValue(name, original, RegistryValueKind.String);
             }
             else if (IsEapo(fx.GetValue(name))) fx.DeleteValue(name, false);
@@ -123,7 +124,7 @@ public static class EqualizerApo
             if (fx.GetValue(name) is string[] list && list.Any(IsEapo))
             {
                 var original = child?.GetValue($"{FxClsid},{single}") as string;
-                bool haveOriginal = original != null && original != "!VALUE" && !IsEapo(original) && !original.Trim('{', '}').All(c => c is '0' or '-');
+                bool haveOriginal = WaveFixEngine.IsRealEffect(original) && !IsEapo(original);
                 var rest = list.SelectMany(c => IsEapo(c) ? (haveOriginal ? new[] { original! } : Array.Empty<string>()) : new[] { c })
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                 if (rest.Length > 0) fx.SetValue(name, rest, RegistryValueKind.MultiString);
