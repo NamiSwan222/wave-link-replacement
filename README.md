@@ -37,6 +37,11 @@ audio APIs.
 - **Voice changer:** 10 voices (Deep, Giant, Chipmunk, Robot, Alien, Phone call, Megaphone, Cave,
   Underwater, Ghost) or a Custom mix of pitch, robot, wobble, grit, echo and room. Pitch shifting
   adds about 40 ms of delay
+- **Soundboard:** MP3/WAV/M4A/WMA/AAC/FLAC sounds (up to 60 s) mixed into the mic inside the
+  audio engine (after the voice changer, before peak protection), with a key per sound, Stop all,
+  a volume for others and optional "hear it myself". The app streams the mix to the plugin through
+  a memory-mapped file (`C:\ProgramData\WaveFix\Engine\bridge.bin`, LOCAL SERVICE gets write
+  access); it never plays the sound into the mic from an app, so nothing leaks into Discord streams
 - **WaveFix Voice FX:** voice polish and the voice changer are WaveFix's own VST2 plugin
   (`native/wavefix-fx`, Rust, no SDK needed). It's embedded in WaveFix.exe and copied to
   `C:\ProgramData\WaveFix\Engine` so Equalizer APO can load it inside the audio engine, which is
@@ -51,7 +56,8 @@ audio APIs.
   chain exactly like Equalizer APO's editor (`ChunkData "…"` or `"name" value` pairs). Reset
   returns a plugin to its defaults
 - **Shortcuts:** system-wide hotkeys (work in games): mute toggle, push to talk, noise removal
-  on/off, mic boost up/down, next voice tone, voice changer on/off, next voice, open WaveFix, with
+  on/off, mic boost up/down, next voice tone, voice changer on/off, next voice, stop all sounds,
+  a key per soundboard sound, open WaveFix, with
   an on-screen confirmation. F-keys and numpad keys can be used on their own
 - Friendly dark UI (palette and type from the UI/UX Pro Max "podcast / music streaming"
   profile, [Plus Jakarta Sans](https://github.com/tokotype/PlusJakartaSans) under the OFL),

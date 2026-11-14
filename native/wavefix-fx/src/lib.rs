@@ -5,6 +5,7 @@
 //! The VST2 ABI is declared here by hand (no Steinberg SDK needed); it matches the layout
 //! WaveFix's own host reads in src/WaveFix/VstPlugin.cs.
 
+pub mod bridge;
 pub mod dsp;
 pub mod params;
 
@@ -121,7 +122,11 @@ extern "C" fn dispatcher(e: *mut AEffect, op: i32, index: i32, value: isize, ptr
                 0
             }
             EFF_MAINS_CHANGED => {
-                if value != 0 { if let Some(p) = unsafe { plugin(e) } { p.dsp.reset(); } }
+                if value != 0 {
+                    if let Some(p) = unsafe { plugin(e) } { p.dsp.reset(); }
+                    // Not the audio thread: a good moment to connect to the app's audio.
+                    bridge::attach();
+                }
                 0
             }
             EFF_GET_PARAM_NAME => {

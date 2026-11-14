@@ -55,7 +55,8 @@ pub const VERB_MIX: usize = 25;
 pub const VERB_SIZE: usize = 26;
 pub const LIM_ON: usize = 27;
 pub const LIM_CEILING: usize = 28;
-pub const COUNT: usize = 29;
+pub const SB_ON: usize = 29;
+pub const COUNT: usize = 30;
 
 /// Names stay at 15 characters or fewer and without spaces (hosts give small name buffers).
 pub static PARAMS: [Param; COUNT] = [
@@ -88,6 +89,8 @@ pub static PARAMS: [Param; COUNT] = [
     lin("VerbSize", 0.0, 1.0, 0.5, "%"),
     toggle("LimOn"),
     lin("LimCeiling", -24.0, 0.0, -1.0, "dB"),
+    // Mixes in audio the WaveFix app sends (soundboard), just before the limiter.
+    toggle("SbOn"),
 ];
 
 impl Param {

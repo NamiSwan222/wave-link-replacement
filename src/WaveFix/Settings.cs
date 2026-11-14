@@ -43,6 +43,7 @@ public sealed class AppSettings
     /// <summary>Band gains used when the voice tone is Custom.</summary>
     public CustomEq CustomEq { get; set; } = new();
     public VoiceSettings Voice { get; set; } = new();
+    public SoundboardSettings Soundboard { get; set; } = new();
 
     static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WaveFix");
     static string FilePath => Path.Combine(Folder, "settings.json");

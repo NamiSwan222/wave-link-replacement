@@ -117,7 +117,7 @@ public sealed class EffectsEngine
     {
         var sb = new StringBuilder().AppendLine("# WaveFix mic chain. Changes here are overwritten by the app.");
         // Order: rumble filter, then noise removal on the cleanest signal, then tone, the user's
-        // plugins, voice polish and the voice changer, then level, and peak protection last.
+        // plugins, voice polish and the voice changer, then level, then soundboard and peak protection.
         if (s.LowCut) sb.AppendLine("Filter: ON HP Fc 80 Hz");
         if (s.NoiseRemoval && HasNoisePlugin) sb.AppendLine(PluginState.ConfigLine(NoisePluginPath, s.NoiseState));
         var tone = s.EqPreset == EqPresets.Custom ? s.CustomEq.Lines() : EqPresets.Lines(s.EqPreset);
@@ -126,7 +126,7 @@ public sealed class EffectsEngine
             sb.AppendLine(PluginState.ConfigLine(p.Path, p.State));
         if (VoiceFx.MainLine(s.Polish, s.Voice) is { } fx) sb.AppendLine(fx);
         if (Math.Abs(s.VoiceBoostDb) > 0.05) sb.AppendLine(FormattableString.Invariant($"Preamp: {s.VoiceBoostDb:0.0} dB"));
-        if (VoiceFx.LimiterLine(s.Polish) is { } limiter) sb.AppendLine(limiter);
+        if (VoiceFx.OutputLine(s.Polish, s.Soundboard) is { } output) sb.AppendLine(output);
         return sb.ToString();
     }
 

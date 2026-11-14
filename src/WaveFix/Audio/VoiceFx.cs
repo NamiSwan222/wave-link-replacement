@@ -78,6 +78,7 @@ public static class VoiceFx
         EchoMix = new("EchoMix", 0, 1), EchoTime = new("EchoTime", 20, 1000), EchoFeedback = new("EchoFeedback", 0, 0.9),
         VerbMix = new("VerbMix", 0, 1), VerbSize = new("VerbSize", 0, 1);
     public static readonly Param LimOn = new("LimOn", 0, 1), LimCeiling = new("LimCeiling", -24, 0);
+    public static readonly Param SbOn = new("SbOn", 0, 1);
 
     /// <summary>Every parameter in the plugin's order (used to check the plugin matches this table).</summary>
     public static readonly Param[] All =
@@ -85,7 +86,7 @@ public static class VoiceFx
         ExpOn, ExpThresh, ExpRatio, DeEssOn, DeEssFreq, DeEssThresh, DeEssRange,
         CompOn, CompThresh, CompRatio, CompAttack, CompRelease, CompMakeup,
         VoiceOn, Pitch, RobotMix, RobotFreq, Wobble, WobbleRate, Drive, LowCut, HighCut,
-        EchoMix, EchoTime, EchoFeedback, VerbMix, VerbSize, LimOn, LimCeiling,
+        EchoMix, EchoTime, EchoFeedback, VerbMix, VerbSize, LimOn, LimCeiling, SbOn,
     };
 
     sealed class Builder
@@ -141,11 +142,16 @@ public static class VoiceFx
         return any ? PluginState.ConfigLine(dll, new PluginState { Params = b.Map }) : null;
     }
 
-    /// <summary>Config line for the limiter instance (the very last effect, after mic boost), or null.</summary>
-    public static string? LimiterLine(PolishSettings polish)
+    /// <summary>
+    /// Config line for the last instance (after mic boost), or null: the soundboard is mixed in
+    /// there (so the voice changer doesn't pitch it), then peak protection.
+    /// </summary>
+    public static string? OutputLine(PolishSettings polish, SoundboardSettings soundboard)
     {
-        if (!polish.Limiter || InstalledPath is not { } dll) return null;
-        var b = new Builder().On(LimOn).Set(LimCeiling, polish.LimiterCeilingDb);
+        if (!polish.Limiter && !soundboard.Enabled || InstalledPath is not { } dll) return null;
+        var b = new Builder();
+        if (soundboard.Enabled) b.On(SbOn);
+        if (polish.Limiter) b.On(LimOn).Set(LimCeiling, polish.LimiterCeilingDb);
         return PluginState.ConfigLine(dll, new PluginState { Params = b.Map });
     }
 }

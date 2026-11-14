@@ -87,6 +87,7 @@ public sealed record ShortcutAction(string Id, string Title, string Description,
         new("next-tone", "Next voice tone", "Cycles Natural → Warm → Clear → Broadcast → Radio → Custom.", ""),
         new("toggle-voice", "Voice changer on / off", "Switch between your real voice and the voice changer.", ""),
         new("next-voice", "Next voice", "Cycles through the voice changer's voices (and turns it on).", ""),
+        new("stop-sounds", "Stop all sounds", "Stops everything the soundboard is playing.", ""),
         new("show-app", "Open WaveFix", "Brings this window to the front.", ""),
     };
 }

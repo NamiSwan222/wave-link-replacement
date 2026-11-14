@@ -14,7 +14,8 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 - **Voice changer:** Deep, Giant, Chipmunk, Robot, Alien, Phone call, Megaphone, Cave, Underwater, Ghost, or your own mix (pitch, robot, wobble, grit, echo, room). Like every other effect, it runs inside Windows' audio engine, so it never leaks into Discord streams
 - **App mixer:** volume, mute and output device per app
 - **Plugins:** add or scan for your own 64-bit VST2 effects, and open each one's own settings window (changes apply live)
-- **Shortcuts:** global hotkeys: mute, push to talk, boost, voice changer on/off, next voice, and more. Numpad keys work on their own (no Ctrl needed)
+- **Soundboard:** add sound files and play them into your mic with a click or a key. They're mixed in inside Windows' audio engine, so they don't leak into Discord streams either
+- **Shortcuts:** global hotkeys: mute, push to talk, boost, voice changer on/off, next voice, a key for each sound, stop all sounds, and more. Numpad keys work on their own (no Ctrl needed)
 
 ## First-time setup is automatic
 

@@ -96,6 +96,8 @@ public partial class MainWindow : Window
             _shortcutRows.Add(row);
         }
         ShortcutList.ItemsSource = _shortcutRows;
+        _saveSoon.Tick += (_, _) => { _saveSoon.Stop(); _settings.Save(); };
+        InitSoundboard();
 
         _meterTimer.Tick += (_, _) =>
         {
@@ -103,7 +105,7 @@ public partial class MainWindow : Window
             MeterFill.Width = Math.Max(0, MeterHost.ActualWidth * Mic.Level);
             MeterHint.Visibility = Mic.Level > 0.02 ? Visibility.Hidden : Visibility.Visible;
         };
-        _slowTimer.Tick += (_, _) => { RefreshMixer(); UpdateStatus(); };
+        _slowTimer.Tick += (_, _) => { RefreshMixer(); UpdateStatus(); UpdateSoundboardStatus(); };
         _pttTimer.Tick += (_, _) =>
         {
             if (_hotkeys.IsHeld("push-to-talk")) return;
@@ -140,6 +142,7 @@ public partial class MainWindow : Window
         PageSetup.Visibility = NavSetup.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageMic.Visibility = NavMic.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageVoice.Visibility = NavVoice.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        PageSoundboard.Visibility = NavSoundboard.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageMixer.Visibility = NavMixer.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PagePlugins.Visibility = NavPlugins.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageShortcuts.Visibility = NavShortcuts.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -750,6 +753,7 @@ public partial class MainWindow : Window
 
     void OnHotkey(string action)
     {
+        if (OnSoundHotkey(action)) return;
         switch (action)
         {
             case "toggle-mute":
@@ -806,7 +810,9 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        _meterTimer.Stop(); _slowTimer.Stop(); _applySoon.Stop(); _pttTimer.Stop(); _updateTimer.Stop();
+        _meterTimer.Stop(); _slowTimer.Stop(); _applySoon.Stop(); _saveSoon.Stop();
+        _settings.Save();
+        _soundboard.Dispose(); _pttTimer.Stop(); _updateTimer.Stop();
         _hotkeys.Dispose();
         Mic.Dispose(); Mixer.Dispose();
         base.OnClosed(e);

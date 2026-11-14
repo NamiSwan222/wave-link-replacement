@@ -259,6 +259,78 @@ fn param_names_are_short_unique_and_spaceless() {
     }
 }
 
+// ---- Soundboard bridge ----
+
+fn bridge_mem(ring: u32) -> Vec<u64> { vec![0u64; (64 + 4 * ring as usize) / 8 + 1] }
+
+#[test]
+fn soundboard_audio_is_mixed_into_the_mic_and_limited() {
+    use wavefix_fx::bridge::Header;
+    let mut mem = bridge_mem(1 << 16);
+    let h = unsafe { Header::init(mem.as_mut_ptr() as *mut u8, 1 << 16) };
+    // App writes a loud 1 kHz tone, 0.2 s, starting where the plugin is.
+    let clip: Vec<f32> = (0..9600).map(|i| 1.5 * (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / SR).sin()).collect();
+    h.write_at(0, &clip);
+
+    let mut d = Dsp::new();
+    d.set_sample_rate(SR);
+    d.reset();
+    let n = norms(&[(p::SB_ON, 1.0), (p::LIM_ON, 1.0), (p::LIM_CEILING, -1.0)]);
+    let mut mic = sine(200.0, -30.0, 0.7); // quiet voice underneath
+    for c in mic.chunks_mut(480) { d.process_with(&n, c, Some(h)); }
+
+    let during = &mic[480..9000];
+    let after = &mic[26_400..]; // the limiter has fully recovered (80 ms release time constant)
+    assert!(peak_db(during) > -2.0 && peak_db(during) <= -0.99, "clip peak {}", peak_db(during));
+    assert!((rms_db(after) - rms_db(&sine(200.0, -30.0, 0.2))).abs() < 0.2, "mic not back to just the voice after the clip");
+    assert_eq!(h.consumer.load(std::sync::atomic::Ordering::Relaxed), mic.len() as u64 - 480, "consumer = start of the last block");
+}
+
+#[test]
+fn soundboard_off_ignores_the_bridge() {
+    use wavefix_fx::bridge::Header;
+    let mut mem = bridge_mem(1 << 16);
+    let h = unsafe { Header::init(mem.as_mut_ptr() as *mut u8, 1 << 16) };
+    h.write_at(0, &vec![0.5; 4800]);
+    let x = sine(300.0, -20.0, 0.1);
+    let mut y = x.clone();
+    let mut d = Dsp::new();
+    for c in y.chunks_mut(480) { d.process_with(&norms(&[]), c, Some(h)); }
+    assert_eq!(x, y);
+}
+
+#[test]
+fn stereo_mic_instances_both_get_the_sound() {
+    use wavefix_fx::bridge::Header;
+    let mut mem = bridge_mem(1 << 16);
+    let h = unsafe { Header::init(mem.as_mut_ptr() as *mut u8, 1 << 16) };
+    h.write_at(0, &vec![0.25; 48_000]);
+    let n = norms(&[(p::SB_ON, 1.0)]);
+    let (mut left, mut right) = (Dsp::new(), Dsp::new());
+    let (mut l, mut r) = (vec![0f32; 48_000], vec![0f32; 48_000]);
+    // Equalizer APO runs one instance per channel, block by block.
+    for (lc, rc) in l.chunks_mut(480).zip(r.chunks_mut(480)) {
+        left.process_with(&n, lc, Some(h));
+        right.process_with(&n, rc, Some(h));
+    }
+    assert!(l.iter().all(|v| (*v - 0.25).abs() < 1e-6) && l == r);
+}
+
+#[test]
+fn soundboard_underrun_is_silence_not_old_audio() {
+    use wavefix_fx::bridge::Header;
+    let ring = 1 << 12;
+    let mut mem = bridge_mem(ring);
+    let h = unsafe { Header::init(mem.as_mut_ptr() as *mut u8, ring) };
+    h.write_at(0, &vec![0.5; 1000]);
+    let mut d = Dsp::new();
+    let n = norms(&[(p::SB_ON, 1.0)]);
+    let mut buf = vec![0f32; 3000];
+    for c in buf.chunks_mut(480) { d.process_with(&n, c, Some(h)); }
+    assert!(buf[..1000].iter().all(|v| *v == 0.5));
+    assert!(buf[1000..].iter().all(|v| *v == 0.0), "played stale ring data after the app stopped writing");
+}
+
 // ---- The VST2 interface, called the way Equalizer APO calls it. ----
 
 type Dispatcher = extern "C" fn(*mut c_void, i32, i32, isize, *mut c_void, f32) -> isize;

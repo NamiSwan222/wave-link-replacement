@@ -1,6 +1,7 @@
 //! The effects. Everything is allocated up front (sized for 192 kHz) so processing never
 //! allocates, locks or panics: this code runs on the Windows audio engine's real-time thread.
 
+use crate::bridge;
 use crate::params::{self as p, COUNT, PARAMS};
 use std::f32::consts::PI;
 
@@ -236,6 +237,8 @@ pub struct Dsp {
     allpasses: [Allpass; 2],
     // Limiter gain
     lim_gain: f32,
+    // Soundboard (audio from the app)
+    sb: bridge::Reader,
 }
 
 impl Dsp {
@@ -257,6 +260,7 @@ impl Dsp {
             combs: [Comb::new(), Comb::new(), Comb::new(), Comb::new()],
             allpasses: [Allpass::new(), Allpass::new()],
             lim_gain: 1.0,
+            sb: bridge::Reader::default(),
         };
         d.set_sample_rate(48_000.0);
         d
@@ -294,6 +298,13 @@ impl Dsp {
 
     /// Processes one block in place. `norm` holds the 0..1 parameter values.
     pub fn process(&mut self, norm: &[f32; COUNT], buf: &mut [f32]) {
+        let sb_on = PARAMS[p::SB_ON].to_value(norm[p::SB_ON]) >= 0.5;
+        let header = if sb_on { bridge::attach_rt() } else { None };
+        self.process_with(norm, buf, header);
+    }
+
+    /// Same as `process`, with the app bridge given explicitly (tests use their own).
+    pub fn process_with(&mut self, norm: &[f32; COUNT], buf: &mut [f32], bridge: Option<&bridge::Header>) {
         let mut vals = [0f32; COUNT];
         for i in 0..COUNT { vals[i] = PARAMS[i].to_value(norm[i]); }
         let s = Settings(vals);
@@ -439,13 +450,23 @@ impl Dsp {
                 }
             }
 
+            *x = y;
+        }
+
+        // Soundboard and other app audio: after the voice changer (sounds aren't pitched),
+        // before the limiter (so a loud clip can't clip the mic).
+        if s.on(p::SB_ON) {
+            if let Some(h) = bridge { self.sb.mix(h, sr as u32, buf, 1.0); }
+        }
+
+        for x in buf.iter_mut() {
+            let mut y = *x;
             if lim {
                 let a = y.abs();
                 let need = if a > ceil { ceil / a } else { 1.0 };
                 self.lim_gain = if need < self.lim_gain { need } else { need + lim_rel * (self.lim_gain - need) };
                 y = (y * self.lim_gain).clamp(-ceil, ceil);
             }
-
             // Kill denormals and any runaway value before it reaches the audio engine.
             if !y.is_finite() || y.abs() < 1e-20 { y = 0.0; }
             *x = y.clamp(-4.0, 4.0);
