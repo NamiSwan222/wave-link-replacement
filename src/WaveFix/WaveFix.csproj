@@ -32,6 +32,24 @@
     <Using Remove="System.Drawing" />
   </ItemGroup>
 
+  <!--
+    WaveFix's own effects plugin (voice polish + voice changer), a VST2 written in Rust in
+    native/wavefix-fx. It's built here and embedded in the exe. Without Rust (cargo) the app still
+    builds, minus those effects; release builds pass -p:RequireVoiceFx=true so that can't slip out.
+  -->
+  <PropertyGroup>
+    <VoiceFxDir>$(MSBuildThisFileDirectory)..\..\native\wavefix-fx\</VoiceFxDir>
+    <VoiceFxDll>$(VoiceFxDir)target\release\wavefix_fx.dll</VoiceFxDll>
+  </PropertyGroup>
+  <Target Name="BuildVoiceFx" BeforeTargets="BeforeBuild" Condition="'$(SkipVoiceFx)' != 'true'">
+    <Exec Command="cargo build --release --quiet --manifest-path &quot;$(VoiceFxDir)Cargo.toml&quot;" ContinueOnError="WarnAndContinue" />
+    <Error Condition="'$(RequireVoiceFx)' == 'true' And !Exists('$(VoiceFxDll)')" Text="The voice effects plugin didn't build (needs Rust: https://rustup.rs)." />
+    <Warning Condition="!Exists('$(VoiceFxDll)')" Text="Building without the voice effects plugin (install Rust from https://rustup.rs to include it)." />
+    <ItemGroup Condition="Exists('$(VoiceFxDll)')">
+      <EmbeddedResource Include="$(VoiceFxDll)" LogicalName="WaveFix.VoiceFx.dll" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="System.Management" Version="8.0.0" />

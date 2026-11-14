@@ -67,6 +67,7 @@
                 <StackPanel>
                     <RadioButton x:Name="NavSetup" Style="{StaticResource NavItem}" GroupName="nav" Content="Setup" Tag="&#xE713;" Checked="Nav_Checked" Visibility="Collapsed"/>
                     <RadioButton x:Name="NavMic" Style="{StaticResource NavItem}" GroupName="nav" Content="Microphone" Tag="&#xE720;" IsChecked="True" Checked="Nav_Checked"/>
+                    <RadioButton x:Name="NavVoice" Style="{StaticResource NavItem}" GroupName="nav" Content="Voice changer" Tag="&#xE8D6;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavMixer" Style="{StaticResource NavItem}" GroupName="nav" Content="App mixer" Tag="&#xE767;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavPlugins" Style="{StaticResource NavItem}" GroupName="nav" Content="Plugins" Tag="&#xEA86;" Checked="Nav_Checked"/>
                     <RadioButton x:Name="NavShortcuts" Style="{StaticResource NavItem}" GroupName="nav" Content="Shortcuts" Tag="&#xE765;" Checked="Nav_Checked"/>
@@ -288,6 +289,15 @@
 
                                 <TextBlock Text="Voice tone" Style="{StaticResource Label}" Margin="0,0,0,10"/>
                                 <WrapPanel x:Name="PresetPanel" Margin="0,0,0,10"/>
+                                <StackPanel x:Name="CustomEqPanel" Visibility="Collapsed" Margin="0,4,0,6">
+                                    <DockPanel Margin="0,0,0,10">
+                                        <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Click="CustomEqReset_Click" AutomationProperties.Name="Reset custom tone">
+                                            <TextBlock Text="Reset" FontSize="12.5" Foreground="{StaticResource SubText}"/>
+                                        </Button>
+                                        <TextBlock Text="Shape your own tone. Small moves (2 to 4 dB) go a long way." Style="{StaticResource Hint}" TextWrapping="Wrap"/>
+                                    </DockPanel>
+                                    <StackPanel x:Name="CustomEqBands"/>
+                                </StackPanel>
 
                                 <Border CornerRadius="12" Background="#16162B" Padding="14,12" Margin="0,8,0,0">
                                     <Grid>
@@ -303,6 +313,137 @@
                             </StackPanel>
                         </Border>
                     </Grid>
+
+                    <!-- Voice polish -->
+                    <Border Style="{StaticResource Card}" Margin="0,20,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Voice polish" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
+                            <TextBlock Text="Studio tools that make you sound steady and pro. Like everything here, they run in Windows' audio engine." Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,18"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="28"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <StackPanel Margin="0,0,0,18">
+                                    <CheckBox x:Name="LevelerSwitch" Style="{StaticResource Switch}" Click="Polish_Click" AutomationProperties.Name="Leveler">
+                                        <StackPanel>
+                                            <TextBlock Text="Leveler" Style="{StaticResource Label}"/>
+                                            <TextBlock Text="Evens out loud and quiet moments so you're always easy to hear (a compressor)." Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <DockPanel Margin="0,10,0,2">
+                                        <TextBlock x:Name="LevelerValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Strength" Style="{StaticResource Hint}"/>
+                                    </DockPanel>
+                                    <Slider x:Name="LevelerSlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10" ValueChanged="Polish_Changed" AutomationProperties.Name="Leveler strength"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Margin="0,0,0,18">
+                                    <CheckBox x:Name="DeEsserSwitch" Style="{StaticResource Switch}" Click="Polish_Click" AutomationProperties.Name="De-esser">
+                                        <StackPanel>
+                                            <TextBlock Text="De-esser" Style="{StaticResource Label}"/>
+                                            <TextBlock Text="Softens sharp S and SH sounds without dulling your voice." Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <DockPanel Margin="0,10,0,2">
+                                        <TextBlock x:Name="DeEsserValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Strength" Style="{StaticResource Hint}"/>
+                                    </DockPanel>
+                                    <Slider x:Name="DeEsserSlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10" ValueChanged="Polish_Changed" AutomationProperties.Name="De-esser strength"/>
+                                </StackPanel>
+                                <StackPanel Grid.Row="1" Margin="0,0,0,0">
+                                    <CheckBox x:Name="SilencerSwitch" Style="{StaticResource Switch}" Click="Polish_Click" AutomationProperties.Name="Background silencer">
+                                        <StackPanel>
+                                            <TextBlock Text="Background silencer" Style="{StaticResource Label}"/>
+                                            <TextBlock Text="Turns down quiet sounds while you aren't talking (an expander)." Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <DockPanel Margin="0,10,0,2">
+                                        <TextBlock x:Name="SilencerValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Sensitivity" Style="{StaticResource Hint}"/>
+                                    </DockPanel>
+                                    <Slider x:Name="SilencerSlider" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10" ValueChanged="Polish_Changed" AutomationProperties.Name="Background silencer sensitivity"/>
+                                </StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,0">
+                                    <CheckBox x:Name="LimiterSwitch" Style="{StaticResource Switch}" Click="Polish_Click" AutomationProperties.Name="Peak protection">
+                                        <StackPanel>
+                                            <TextBlock Text="Peak protection" Style="{StaticResource Label}"/>
+                                            <TextBlock Text="Stops shouts and laughs from clipping. Runs last, after mic boost (a limiter)." Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <DockPanel Margin="0,10,0,2">
+                                        <TextBlock x:Name="LimiterValue" DockPanel.Dock="Right" Foreground="{StaticResource SubText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Loudest allowed" Style="{StaticResource Hint}"/>
+                                    </DockPanel>
+                                    <Slider x:Name="LimiterSlider" Minimum="-12" Maximum="0" TickFrequency="0.5" IsSnapToTickEnabled="True" SmallChange="0.5" LargeChange="1" ValueChanged="Polish_Changed" AutomationProperties.Name="Peak protection loudest allowed"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ===== Voice changer ===== -->
+            <ScrollViewer x:Name="PageVoice" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="32,26,32,26">
+                <StackPanel>
+                    <TextBlock Text="Voice changer" Style="{StaticResource PageTitle}"/>
+                    <TextBlock Text="Sound like someone (or something) else in Discord, games and every other app." Style="{StaticResource PageSubtitle}"/>
+
+                    <Border x:Name="FxMissing" CornerRadius="12" Background="{StaticResource WarnSoft}" Padding="14,12" Margin="0,0,0,16" Visibility="Collapsed">
+                        <TextBlock Style="{StaticResource Hint}" Foreground="{StaticResource Text}" TextWrapping="Wrap"
+                                   Text="This copy of WaveFix was built without its voice effects, so the voice changer and voice polish can't run. Install the latest release to get them."/>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                        <CheckBox x:Name="VoiceSwitch" Style="{StaticResource Switch}" Click="VoiceSwitch_Click" AutomationProperties.Name="Voice changer">
+                            <StackPanel>
+                                <TextBlock Text="Voice changer" FontSize="16" FontWeight="Bold"/>
+                                <TextBlock x:Name="VoiceStateText" Style="{StaticResource Hint}" Margin="0,3,0,0"/>
+                            </StackPanel>
+                        </CheckBox>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                        <StackPanel>
+                            <TextBlock Text="Voices" Style="{StaticResource CardTitle}" Margin="0,0,0,14"/>
+                            <WrapPanel x:Name="VoicePresetPanel"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,4">
+                                <Button x:Name="VoiceResetButton" DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Click="VoiceReset_Click" AutomationProperties.Name="Reset the voice to its preset">
+                                    <TextBlock Text="Back to preset" FontSize="12.5" Foreground="{StaticResource SubText}"/>
+                                </Button>
+                                <TextBlock Text="Fine tune" Style="{StaticResource CardTitle}"/>
+                            </DockPanel>
+                            <TextBlock Text="Moving a slider makes it your own Custom voice." Style="{StaticResource Hint}" Margin="0,0,0,16"/>
+                            <Grid x:Name="VoiceSliders">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="28"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border CornerRadius="12" Background="#16162B" Padding="14,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Grid.Column="1" Style="{StaticResource Hint}" TextWrapping="Wrap"
+                                       Text="Like your other effects, the voice changer runs inside Windows' audio engine, so Discord streams still can't pick up your mic. Changing pitch adds a small delay (about 40 ms). Set a shortcut to switch voices mid-game."/>
+                        </Grid>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
 
@@ -389,7 +530,7 @@
                         </StackPanel>
                         <StackPanel>
                             <TextBlock Text="Plugins" Style="{StaticResource PageTitle}"/>
-                            <TextBlock Text="Add your own VST effects to your mic. They run after Sound cleanup and before Mic boost, top to bottom." Style="{StaticResource PageSubtitle}"/>
+                            <TextBlock Text="Add your own VST effects to your mic. They run after Sound cleanup and voice tone, before Voice polish and Mic boost, top to bottom." Style="{StaticResource PageSubtitle}"/>
                         </StackPanel>
                     </DockPanel>
 
@@ -563,7 +704,7 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE82F;" Style="{StaticResource Icon}" Foreground="#A5B4FC" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock Style="{StaticResource Hint}" MaxWidth="700"
-                                       Text="Tip: combine a key with Ctrl, Alt or Shift so it doesn't get in the way of typing. While setting a shortcut, Esc cancels and Backspace removes it."/>
+                                       Text="Tip: combine a key with Ctrl, Alt or Shift so it doesn't get in the way of typing. F-keys and numpad keys (Num 1, Num +...) also work on their own; numpad keys need Num Lock on. While setting a shortcut, Esc cancels and Backspace removes it."/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

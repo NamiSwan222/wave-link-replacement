@@ -34,6 +34,7 @@ public partial class MainWindow : Window
         (EqPresets.Clear, "Clear", "Crisp, easy to hear"),
         (EqPresets.Broadcast, "Broadcast", "Radio-host polish"),
         (EqPresets.Radio, "Radio", "Old-school walkie"),
+        (EqPresets.Custom, "Custom", "Your own sliders"),
     };
 
     public MainWindow(AppSettings settings)
@@ -58,6 +59,7 @@ public partial class MainWindow : Window
         UpdateBoostLabel();
         StartupSwitch.IsChecked = StartupRegistration.IsEnabled;
         AutoUpdateSwitch.IsChecked = _settings.AutoUpdate;
+        InitVoiceAndPolish();
         VersionText.Text = $"Version {Updater.Current} · Check for updates";
 
         Mic.DeviceChanged += () =>
@@ -137,6 +139,7 @@ public partial class MainWindow : Window
         if (PageMic == null || PageSetup == null) return; // fires during InitializeComponent
         PageSetup.Visibility = NavSetup.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageMic.Visibility = NavMic.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        PageVoice.Visibility = NavVoice.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageMixer.Visibility = NavMixer.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PagePlugins.Visibility = NavPlugins.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PageShortcuts.Visibility = NavShortcuts.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -714,10 +717,11 @@ public partial class MainWindow : Window
         if (key is Key.Back or Key.Delete && Keyboard.Modifiers == ModifierKeys.None) { StopRecording(); SaveShortcut(row, null); return; }
 
         var mods = Keyboard.Modifiers;
-        bool functionKey = key is >= Key.F1 and <= Key.F24;
-        if (mods == ModifierKeys.None && !functionKey)
+        // F-keys and numpad keys work on their own: nobody types text with them.
+        bool standalone = key is >= Key.F1 and <= Key.F24 || Hotkey.IsNumpad(key);
+        if (mods == ModifierKeys.None && !standalone)
         {
-            row.Error = "Add Ctrl, Alt or Shift so this key still works normally when you type.";
+            row.Error = "Add Ctrl, Alt or Shift so this key still works normally when you type. (F-keys and numpad keys work on their own.)";
             return; // keep listening
         }
         StopRecording();
@@ -776,6 +780,13 @@ public partial class MainWindow : Window
                 next.IsChecked = true;
                 Osd.Show(this, "", $"Voice tone: {next.Content}");
                 break;
+            case "toggle-voice":
+                SetVoiceChanger(!_settings.Voice.Enabled, "shortcut");
+                Osd.Show(this, "", _settings.Voice.Enabled ? $"Voice changer on: {VoiceLabel}" : "Voice changer off");
+                break;
+            case "next-voice":
+                NextVoice();
+                break;
             case "show-app":
                 Show();
                 if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
@@ -795,7 +806,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        _meterTimer.Stop(); _slowTimer.Stop(); _pttTimer.Stop(); _updateTimer.Stop();
+        _meterTimer.Stop(); _slowTimer.Stop(); _applySoon.Stop(); _pttTimer.Stop(); _updateTimer.Stop();
         _hotkeys.Dispose();
         Mic.Dispose(); Mixer.Dispose();
         base.OnClosed(e);

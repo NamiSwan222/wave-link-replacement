@@ -13,3 +13,6 @@ obj/
 backup/
 publish/
 installer/Output/
+
+# Rust build output
+target/

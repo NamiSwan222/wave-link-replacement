@@ -11,7 +11,8 @@ public static class EqPresets
     public const string Clear = "Clear";
     public const string Broadcast = "Broadcast";
     public const string Radio = "Radio";
-    public static readonly string[] All = { Flat, Warm, Clear, Broadcast, Radio };
+    public const string Custom = "Custom";
+    public static readonly string[] All = { Flat, Warm, Clear, Broadcast, Radio, Custom };
 
     /// <summary>Equalizer APO filter lines for each preset.</summary>
     public static IEnumerable<string> Lines(string preset) => preset switch
@@ -115,13 +116,17 @@ public sealed class EffectsEngine
     public string BuildMicChain(AppSettings s)
     {
         var sb = new StringBuilder().AppendLine("# WaveFix mic chain. Changes here are overwritten by the app.");
-        // Order: rumble filter, then noise removal on the cleanest signal, then tone, then level.
+        // Order: rumble filter, then noise removal on the cleanest signal, then tone, the user's
+        // plugins, voice polish and the voice changer, then level, and peak protection last.
         if (s.LowCut) sb.AppendLine("Filter: ON HP Fc 80 Hz");
         if (s.NoiseRemoval && HasNoisePlugin) sb.AppendLine(PluginState.ConfigLine(NoisePluginPath, s.NoiseState));
-        foreach (var line in EqPresets.Lines(s.EqPreset)) sb.AppendLine(line);
+        var tone = s.EqPreset == EqPresets.Custom ? s.CustomEq.Lines() : EqPresets.Lines(s.EqPreset);
+        foreach (var line in tone) sb.AppendLine(line);
         foreach (var p in s.Plugins.Where(p => p.Enabled && File.Exists(p.Path)))
             sb.AppendLine(PluginState.ConfigLine(p.Path, p.State));
+        if (VoiceFx.MainLine(s.Polish, s.Voice) is { } fx) sb.AppendLine(fx);
         if (Math.Abs(s.VoiceBoostDb) > 0.05) sb.AppendLine(FormattableString.Invariant($"Preamp: {s.VoiceBoostDb:0.0} dB"));
+        if (VoiceFx.LimiterLine(s.Polish) is { } limiter) sb.AppendLine(limiter);
         return sb.ToString();
     }
 

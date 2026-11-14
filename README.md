@@ -31,7 +31,16 @@ audio APIs.
 - **Mic:** pick the mic, input level, mic boost (up to +24 dB, applied in the audio engine), mute, live level meter
 - **Effects:** AI noise removal and gate
   ([RNNoise VST](https://github.com/werman/noise-suppression-for-voice)), 80 Hz low cut,
-  voice tone presets (Flat, Warm, Clear, Broadcast, Radio)
+  voice tone presets (Flat, Warm, Clear, Broadcast, Radio) and a Custom 5-band EQ
+- **Voice polish:** leveler (compressor), de-esser, background silencer (downward expander) and
+  peak protection (limiter, the very last effect, after mic boost)
+- **Voice changer:** 10 voices (Deep, Giant, Chipmunk, Robot, Alien, Phone call, Megaphone, Cave,
+  Underwater, Ghost) or a Custom mix of pitch, robot, wobble, grit, echo and room. Pitch shifting
+  adds about 40 ms of delay
+- **WaveFix Voice FX:** voice polish and the voice changer are WaveFix's own VST2 plugin
+  (`native/wavefix-fx`, Rust, no SDK needed). It's embedded in WaveFix.exe and copied to
+  `C:\ProgramData\WaveFix\Engine` so Equalizer APO can load it inside the audio engine, which is
+  what keeps it out of Discord streams like the rest of the chain
 - **App mixer:** volume, mute and output device for each app playing sound
 - **Plugins:** add your own 64-bit VST2 effects to the mic chain, or **scan** the usual VST
   folders (and any folder you pick) for them; turn on/off, reorder, remove. They're copied to
@@ -42,7 +51,8 @@ audio APIs.
   chain exactly like Equalizer APO's editor (`ChunkData "…"` or `"name" value` pairs). Reset
   returns a plugin to its defaults
 - **Shortcuts:** system-wide hotkeys (work in games): mute toggle, push to talk, noise removal
-  on/off, mic boost up/down, next voice tone, open WaveFix, with an on-screen confirmation
+  on/off, mic boost up/down, next voice tone, voice changer on/off, next voice, open WaveFix, with
+  an on-screen confirmation. F-keys and numpad keys can be used on their own
 - Friendly dark UI (palette and type from the UI/UX Pro Max "podcast / music streaming"
   profile, [Plus Jakarta Sans](https://github.com/tokotype/PlusJakartaSans) under the OFL),
   keyboard focus rings, screen-reader names, per-monitor DPI
@@ -89,7 +99,8 @@ until verified. Done steps are skipped.
    `tools\set-mic-effect-slot.ps1` if your mic isn't the one it targets.
 4. Restart Windows Audio (or reboot).
 5. Install WaveFix (above), or build it yourself: `dotnet run -c Release --project src\WaveFix`
-   (needs the .NET 8 SDK). Close Wave Link.
+   (needs the .NET 8 SDK, plus [Rust](https://rustup.rs) for the voice effects; without Rust it
+   builds without them). Close Wave Link.
 
 In Discord, OBS and other apps, select the physical mic (e.g. `Mic In (Elgato Wave:3)`),
 not any `Elgato Virtual Audio` device.
@@ -103,7 +114,6 @@ included. `tools/mic-level.ps1 -Raw` shows the difference.
 
 ## Known limits
 
-- No compressor yet.
 - Per-app output switching uses the same undocumented Windows API as EarTrumpet. Some apps
   only switch after they restart their audio.
 

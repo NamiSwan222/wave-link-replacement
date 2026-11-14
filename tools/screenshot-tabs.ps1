@@ -4,7 +4,7 @@ param([string]$OutDir = $env:TEMP)
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $p = Get-Process WaveFix -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 $root = [Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
-foreach ($tab in 'Microphone', 'App mixer', 'Plugins', 'Shortcuts') {
+foreach ($tab in 'Microphone', 'Voice changer', 'App mixer', 'Plugins', 'Shortcuts') {
   $cond = New-Object Windows.Automation.AndCondition(
     (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::RadioButton)),
     (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $tab)))

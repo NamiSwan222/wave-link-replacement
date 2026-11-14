@@ -25,6 +25,7 @@ public readonly record struct Hotkey(ModifierKeys Modifiers, Key Key)
     {
         >= Key.D0 and <= Key.D9 => ((char)('0' + (k - Key.D0))).ToString(),
         >= Key.NumPad0 and <= Key.NumPad9 => "Num " + (k - Key.NumPad0),
+        Key.Multiply => "Num *", Key.Add => "Num Plus", Key.Subtract => "Num -", Key.Divide => "Num /", Key.Decimal => "Num .",
         Key.OemTilde => "`", Key.OemMinus => "-", Key.OemPlus => "=", Key.OemComma => ",", Key.OemPeriod => ".",
         Key.Oem2 => "/", Key.Oem1 => ";", Key.Oem7 => "'", Key.OemOpenBrackets => "[", Key.Oem6 => "]", Key.Oem5 => "\\",
         Key.Next => "PageDown", Key.Prior => "PageUp", Key.Capital => "CapsLock", Key.Return => "Enter",
@@ -48,12 +49,22 @@ public readonly record struct Hotkey(ModifierKeys Modifiers, Key Key)
                     var conv = new KeyConverter();
                     if (raw.Length == 1 && char.IsDigit(raw[0])) key = Key.D0 + (raw[0] - '0');
                     else if (raw.StartsWith("Num ", StringComparison.OrdinalIgnoreCase) && int.TryParse(raw[4..], out var n)) key = Key.NumPad0 + n;
+                    else if (raw.StartsWith("Num ", StringComparison.OrdinalIgnoreCase) && NumpadSymbol(raw[4..]) is { } sym) key = sym;
                     else try { key = (Key?)conv.ConvertFromInvariantString(raw); } catch { key = ReverseOem(raw); }
                     break;
             }
         }
         return key is { } k ? new Hotkey(mods, k) : null;
     }
+
+    /// <summary>Numpad keys (digits and * + - / .), which can be used without Ctrl/Alt/Shift.</summary>
+    public static bool IsNumpad(Key k) =>
+        k is >= Key.NumPad0 and <= Key.NumPad9 or Key.Multiply or Key.Add or Key.Subtract or Key.Divide or Key.Decimal;
+
+    static Key? NumpadSymbol(string s) => s.Trim() switch
+    {
+        "*" => Key.Multiply, "+" or "Plus" => Key.Add, "-" => Key.Subtract, "/" => Key.Divide, "." => Key.Decimal, _ => null,
+    };
 
     static Key? ReverseOem(string s) => s switch
     {
@@ -73,7 +84,9 @@ public sealed record ShortcutAction(string Id, string Title, string Description,
         new("toggle-noise", "Noise removal on / off", "Quickly switch the background-noise cleanup.", ""),
         new("boost-up", "Mic boost up", "Makes you 3 dB louder.", ""),
         new("boost-down", "Mic boost down", "Makes you 3 dB quieter.", ""),
-        new("next-tone", "Next voice tone", "Cycles Natural → Warm → Clear → Broadcast → Radio.", ""),
+        new("next-tone", "Next voice tone", "Cycles Natural → Warm → Clear → Broadcast → Radio → Custom.", ""),
+        new("toggle-voice", "Voice changer on / off", "Switch between your real voice and the voice changer.", ""),
+        new("next-voice", "Next voice", "Cycles through the voice changer's voices (and turns it on).", ""),
         new("show-app", "Open WaveFix", "Brings this window to the front.", ""),
     };
 }

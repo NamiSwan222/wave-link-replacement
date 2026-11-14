@@ -38,6 +38,11 @@ public sealed class AppSettings
     public PluginState? NoiseState { get; set; }
     /// <summary>User VST plugins, in chain order.</summary>
     public List<PluginEntry> Plugins { get; set; } = new();
+    /// <summary>Leveler, de-esser, background silencer and peak protection.</summary>
+    public PolishSettings Polish { get; set; } = new();
+    /// <summary>Band gains used when the voice tone is Custom.</summary>
+    public CustomEq CustomEq { get; set; } = new();
+    public VoiceSettings Voice { get; set; } = new();
 
     static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WaveFix");
     static string FilePath => Path.Combine(Folder, "settings.json");
