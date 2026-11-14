@@ -115,6 +115,20 @@ public static class Updater
         return file;
     }
 
+    /// <summary>Deletes downloaded installers once the update has finished (they're ~65 MB each).</summary>
+    public static void CleanupDownloads()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "WaveFix-Update");
+        // The installer may still be exiting; try a few times in the background.
+        _ = Task.Run(async () =>
+        {
+            for (int i = 0; i < 10 && Directory.Exists(dir); i++)
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { await Task.Delay(3000); }
+            }
+        });
+    }
+
     /// <summary>Runs the installer silently; it closes WaveFix, updates, and starts the new version.</summary>
     public static void StartInstaller(string path) =>
         Process.Start(new ProcessStartInfo(path, "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /UPDATE") { UseShellExecute = true });

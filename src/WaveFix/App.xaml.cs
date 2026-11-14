@@ -49,7 +49,10 @@ public partial class App : Application
         _tray.MouseClick += (_, me) => { if (me.Button == Forms.MouseButtons.Left) ShowWindow(); };
 
         if (updated)
+        {
             Osd.Show(_window, "", $"WaveFix updated to {Updater.Current}");
+            Updater.CleanupDownloads();
+        }
         else if (!e.Args.Contains("--tray"))
             _window.Show();
     }
