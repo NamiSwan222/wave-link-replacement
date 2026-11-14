@@ -1,6 +1,8 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -16,20 +18,38 @@ public partial class MainWindow : Window
     readonly EffectsEngine _engine = new();
     readonly DispatcherTimer _meterTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     readonly DispatcherTimer _slowTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    readonly DispatcherTimer _pttTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
+    readonly HotkeyManager _hotkeys;
+    readonly ObservableCollection<ShortcutRow> _shortcutRows = new();
+    readonly ObservableCollection<PluginEntry> _plugins;
+    ShortcutRow? _recording;
     bool _loading = true;
 
     public bool ReallyClose { get; set; }
 
+    static readonly (string Id, string Label, string Desc)[] Tones =
+    {
+        (EqPresets.Flat, "Natural", "Your real voice"),
+        (EqPresets.Warm, "Warm", "Fuller and cozy"),
+        (EqPresets.Clear, "Clear", "Crisp, easy to hear"),
+        (EqPresets.Broadcast, "Broadcast", "Radio-host polish"),
+        (EqPresets.Radio, "Radio", "Old-school walkie"),
+    };
+
     public MainWindow(AppSettings settings)
     {
         _settings = settings;
+        _plugins = new ObservableCollection<PluginEntry>(_settings.Plugins);
         InitializeComponent();
         DataContext = this;
 
-        foreach (var p in EqPresets.All)
+        // Microphone page
+        foreach (var t in Tones)
         {
-            var rb = new RadioButton { Content = p, GroupName = "eq", Style = (Style)FindResource("Segment"), IsChecked = p == _settings.EqPreset };
-            rb.Checked += (_, _) => { _settings.EqPreset = p; ApplyEffects(); };
+            var rb = new RadioButton { Content = t.Label, Tag = t.Desc, GroupName = "tone", Style = (Style)FindResource("ToneChoice"), IsChecked = t.Id == _settings.EqPreset };
+            System.Windows.Automation.AutomationProperties.SetName(rb, $"Voice tone {t.Label}");
+            var id = t.Id;
+            rb.Checked += (_, _) => { if (_loading) return; _settings.EqPreset = id; ApplyEffects(); };
             PresetPanel.Children.Add(rb);
         }
         NoiseSwitch.IsChecked = _settings.NoiseRemoval;
@@ -43,25 +63,76 @@ public partial class MainWindow : Window
             if (Mic.DeviceId != null && !_loading) { _settings.MicDeviceId = Mic.DeviceId; _settings.Save(); }
             ApplyEffects();
         };
-        Mic.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MicController.Muted)) MuteLabel.Text = Mic.Muted ? "Mic muted" : "Mute mic"; };
+        Mic.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MicController.Muted)) UpdateMuteLabel(); };
         Mic.RefreshDevices(_settings.MicDeviceId);
-        MuteLabel.Text = Mic.Muted ? "Mic muted" : "Mute mic";
+        UpdateMuteLabel();
 
-        RoutingNote.Text = Mixer.RoutingAvailable ? "" : "Output switching unavailable on this Windows version";
+        // Mixer page
+        if (!Mixer.RoutingAvailable)
+            MixerSubtitle.Text += " (Choosing where an app plays isn't available on this version of Windows.)";
         RefreshMixer();
+
+        // Plugins page
+        PluginStore.CleanOrphans(_plugins);
+        PluginList.ItemsSource = _plugins;
+        _plugins.CollectionChanged += (_, _) => EmptyPlugins.Visibility = _plugins.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        EmptyPlugins.Visibility = _plugins.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        // Shortcuts page
+        _hotkeys = new HotkeyManager(this);
+        _hotkeys.Pressed += OnHotkey;
+        foreach (var a in ShortcutAction.All)
+        {
+            var row = new ShortcutRow(a);
+            if (_settings.Shortcuts.TryGetValue(a.Id, out var text) && Hotkey.Parse(text) is { } hk)
+            {
+                row.Key = hk;
+                row.Error = _hotkeys.Set(a.Id, hk);
+            }
+            _shortcutRows.Add(row);
+        }
+        ShortcutList.ItemsSource = _shortcutRows;
 
         _meterTimer.Tick += (_, _) =>
         {
             Mic.PollMeter();
             MeterFill.Width = Math.Max(0, MeterHost.ActualWidth * Mic.Level);
+            MeterHint.Visibility = Mic.Level > 0.02 ? Visibility.Hidden : Visibility.Visible;
         };
         _slowTimer.Tick += (_, _) => { RefreshMixer(); UpdateStatus(); };
+        _pttTimer.Tick += (_, _) =>
+        {
+            if (_hotkeys.IsHeld("push-to-talk")) return;
+            _pttTimer.Stop();
+            Mic.Muted = true;
+            Osd.Show(this, "", "Mic muted");
+        };
         _meterTimer.Start();
         _slowTimer.Start();
 
         _loading = false;
         if (Mic.DeviceId != null) _settings.MicDeviceId = Mic.DeviceId;
         ApplyEffects();
+    }
+
+    // ---------- Navigation ----------
+
+    void Nav_Checked(object sender, RoutedEventArgs e)
+    {
+        if (PageMic == null) return; // fires during InitializeComponent
+        PageMic.Visibility = NavMic.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        PageMixer.Visibility = NavMixer.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        PagePlugins.Visibility = NavPlugins.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        PageShortcuts.Visibility = NavShortcuts.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        StopRecording();
+    }
+
+    // ---------- Microphone ----------
+
+    void UpdateMuteLabel()
+    {
+        MuteLabel.Text = Mic.Muted ? "Muted, click to unmute" : "Mic is on, click to mute";
+        MuteIcon.Text = Mic.Muted ? "" : "";
     }
 
     void RefreshMixer()
@@ -89,49 +160,65 @@ public partial class MainWindow : Window
     void UpdateBoostLabel()
     {
         var v = BoostSlider.Value;
-        BoostValue.Text = v switch { 0 => "off", > 0 => $"+{v:0.#} dB", _ => $"{v:0.#} dB" };
-        // Boost is applied in the audio engine after the input level; big boosts can clip.
-        BoostValue.Foreground = (System.Windows.Media.Brush)FindResource(v > 12 ? "Warn" : "Muted");
+        BoostValue.Text = v switch { 0 => "Off", > 0 => $"+{v:0.#} dB", _ => $"{v:0.#} dB" };
+        BoostValue.Foreground = (Brush)FindResource(v > 12 ? "Warn" : "SubText");
     }
 
     void ApplyEffects()
     {
         if (_loading) return;
+        _settings.Plugins = _plugins.ToList();
         _settings.Save();
         if (Mic.DeviceId == null) return;
         try { _engine.Apply(_settings, Mic.DeviceId); }
-        catch (Exception ex) { SetStatus($"Couldn't write Equalizer APO config: {ex.Message}", bad: true); return; }
+        catch (Exception ex) { SetStatus(StatusKind.Bad, "Couldn't save your effects", ex.Message, "Effects not saved"); return; }
         UpdateStatus();
     }
+
+    enum StatusKind { Good, Warn, Bad }
 
     void UpdateStatus()
     {
         if (!_engine.IsInstalled)
-        { SetStatus("Equalizer APO isn't installed. Effects need it.", bad: true); return; }
+        { SetStatus(StatusKind.Bad, "One more thing to install", "WaveFix needs Equalizer APO to run your effects. Install it, then tick your mic in its Device Selector.", "Setup needed"); return; }
         if (Mic.DeviceId == null)
-        { SetStatus("No microphone found.", bad: true); return; }
+        { SetStatus(StatusKind.Bad, "No microphone found", "Plug in your mic and it'll show up here.", "No mic"); return; }
         if (Process.GetProcessesByName("Elgato.WaveLink").Length > 0)
-        { SetStatus("Wave Link is running. Close it: it leaks your mic into Discord streams.", warn: true); return; }
+        { SetStatus(StatusKind.Warn, "Wave Link is still open", "Close Wave Link. While it runs, people watching your Discord stream can hear your mic.", "Close Wave Link"); return; }
 
         switch (EffectsEngine.GetSlot(Mic.DeviceId))
         {
             case EffectsEngine.SlotState.None:
-                SetStatus("Effects aren't attached to this mic. Attach it in Equalizer APO's Device Selector.", bad: true); break;
+                SetStatus(StatusKind.Bad, "Effects aren't connected to this mic", "Open Equalizer APO's Device Selector and tick this mic on the Capture devices tab.", "Setup needed"); break;
             case EffectsEngine.SlotState.StreamOnly:
-                SetStatus("Effects are attached, but Discord's default mode skips them. Run tools\\run-as-system.ps1 to move them to the endpoint slot.", warn: true); break;
+                SetStatus(StatusKind.Warn, "Almost there", "Discord skips the effects in this setup. Run tools\\run-as-system.ps1 as admin to fix it.", "Almost there"); break;
             default:
-                SetStatus(_settings.NoiseRemoval && !_engine.HasNoisePlugin
-                    ? "Active. Noise removal plugin is missing from Equalizer APO's VSTPlugins\\rnnoise folder."
-                    : "Active for every app on this mic, Discord included.", warn: _settings.NoiseRemoval && !_engine.HasNoisePlugin);
+                if (_settings.NoiseRemoval && !_engine.HasNoisePlugin)
+                    SetStatus(StatusKind.Warn, "Noise removal is missing a file", "Put rnnoise_mono.dll in Equalizer APO's VSTPlugins\\rnnoise folder.", "Missing file");
+                else if (Mic.Muted)
+                    SetStatus(StatusKind.Warn, "Your mic is muted", "Nobody can hear you right now. Click the mute button or use your shortcut to talk.", "Mic muted");
+                else
+                    SetStatus(StatusKind.Good, "You're all set", "Your effects work in Discord, OBS and every other app, and your mic stays out of Discord streams.", "All good");
                 break;
         }
     }
 
-    void SetStatus(string text, bool warn = false, bool bad = false)
+    void SetStatus(StatusKind kind, string title, string text, string pill)
     {
-        StatusText.Text = text;
-        StatusText.Foreground = (Brush)FindResource(bad ? "Bad" : warn ? "Warn" : "Accent");
-        StatusBox.Background = new SolidColorBrush(bad ? Color.FromRgb(0x3A, 0x22, 0x27) : warn ? Color.FromRgb(0x3A, 0x30, 0x1E) : Color.FromRgb(0x1E, 0x33, 0x2A));
+        var (fg, soft, glyph) = kind switch
+        {
+            StatusKind.Good => ("Good", "GoodSoft", ""),
+            StatusKind.Warn => ("Warn", "WarnSoft", ""),
+            _ => ("Bad", "BadSoft", ""),
+        };
+        BannerTitle.Text = title;
+        BannerText.Text = text;
+        BannerIcon.Text = glyph;
+        BannerIconBg.Background = (Brush)FindResource(fg);
+        Banner.Background = (Brush)FindResource(soft);
+        StatusPill.Background = (Brush)FindResource(soft);
+        StatusDot.Fill = (Brush)FindResource(fg);
+        StatusPillText.Text = pill;
     }
 
     void StartupSwitch_Changed(object sender, RoutedEventArgs e)
@@ -142,17 +229,289 @@ public partial class MainWindow : Window
         _settings.Save();
     }
 
+    // ---------- Plugins ----------
+
+    void AddPlugin_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "Pick a VST plugin (64-bit, .dll)",
+            Filter = "VST2 plugins (*.dll)|*.dll|All files (*.*)|*.*",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        AddPluginFile(dlg.FileName);
+    }
+
+    bool AddPluginFile(string file)
+    {
+        var problem = PluginStore.Validate(file);
+        if (problem != null) { ShowPluginError(problem); return false; }
+        try
+        {
+            var entry = PluginStore.Install(file);
+            if (_plugins.Any(p => string.Equals(p.Path, entry.Path, StringComparison.OrdinalIgnoreCase)))
+            { ShowPluginError($"{entry.Name} is already in your list."); return false; }
+            _plugins.Add(entry);
+            ShowPluginError(null);
+            ApplyEffects();
+            return true;
+        }
+        catch (Exception ex) { ShowPluginError($"Couldn't add the plugin: {ex.Message}"); return false; }
+    }
+
+    // ----- Scan -----
+
+    readonly ObservableCollection<PluginStore.Found> _found = new();
+    CancellationTokenSource? _scanCts;
+
+    void ScanPlugins_Click(object sender, RoutedEventArgs e) => _ = RunScan(PluginStore.DefaultScanFolders(), "the usual plugin folders");
+
+    void ScanFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFolderDialog { Title = "Pick a folder that has VST plugins in it" };
+        if (dlg.ShowDialog(this) != true) return;
+        _ = RunScan(new[] { dlg.FolderName }, $"\"{dlg.FolderName}\"");
+    }
+
+    async Task RunScan(IReadOnlyList<string> folders, string where)
+    {
+        _scanCts?.Cancel();
+        var cts = _scanCts = new CancellationTokenSource();
+        ScanResults.ItemsSource = _found;
+        _found.Clear();
+        ScanCard.Visibility = Visibility.Visible;
+        ShowPluginError(null);
+        ScanButton.IsEnabled = false;
+        ScanButtonText.Text = "Scanning…";
+        ScanStatus.Text = $"Looking through {where}…";
+
+        // Skip the built-in noise removal and plugins already in the list (by name: we keep copies).
+        var have = new HashSet<string>(_plugins.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+        var skip = new[] { _engine.NoisePluginPath, _engine.NoisePluginPath.Replace("_mono", "_stereo") };
+        try
+        {
+            var found = await Task.Run(() => PluginStore.Scan(folders, skip, cts.Token), cts.Token);
+            if (cts.IsCancellationRequested) return;
+            foreach (var f in found.Where(f => !have.Contains(f.Name))) _found.Add(f);
+            int already = found.Count - _found.Count;
+            ScanStatus.Text = folders.Count == 0
+                ? "No standard plugin folders exist on this PC. Use Scan a folder… to pick where your plugins are."
+                : _found.Count == 0
+                    ? (already > 0 ? "Every plugin found is already in your list." : $"No 64-bit VST2 plugins found in {where}. If yours are somewhere else, use Scan a folder.")
+                    : $"Found {_found.Count} plugin{(_found.Count == 1 ? "" : "s")} you can add" + (already > 0 ? $" ({already} already added)." : ".");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { ScanStatus.Text = $"The scan stopped: {ex.Message}"; }
+        finally
+        {
+            if (_scanCts == cts) { ScanButton.IsEnabled = true; ScanButtonText.Text = "Scan for plugins"; }
+        }
+    }
+
+    void AddFound_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not PluginStore.Found f) return;
+        if (AddPluginFile(f.Path)) _found.Remove(f);
+        if (_found.Count == 0) ScanStatus.Text = "All added. Turn plugins on or off and reorder them below.";
+    }
+
+    void CloseScan_Click(object sender, RoutedEventArgs e)
+    {
+        _scanCts?.Cancel();
+        ScanCard.Visibility = Visibility.Collapsed;
+        ScanButton.IsEnabled = true;
+        ScanButtonText.Text = "Scan for plugins";
+    }
+
+    void ShowPluginError(string? text)
+    {
+        PluginError.Visibility = text == null ? Visibility.Collapsed : Visibility.Visible;
+        PluginErrorText.Text = text ?? "";
+    }
+
+    void PluginToggle_Click(object sender, RoutedEventArgs e) => ApplyEffects();
+
+    void PluginUp_Click(object sender, RoutedEventArgs e) => MovePlugin(sender, -1);
+    void PluginDown_Click(object sender, RoutedEventArgs e) => MovePlugin(sender, +1);
+
+    void MovePlugin(object sender, int delta)
+    {
+        if ((sender as FrameworkElement)?.Tag is not PluginEntry p) return;
+        int i = _plugins.IndexOf(p), j = i + delta;
+        if (i < 0 || j < 0 || j >= _plugins.Count) return;
+        _plugins.Move(i, j);
+        ApplyEffects();
+    }
+
+    void PluginRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not PluginEntry p) return;
+        _plugins.Remove(p);
+        ApplyEffects(); // take it out of the chain first so the engine releases it
+        PluginStore.Uninstall(p, _plugins);
+    }
+
+    // ---------- Shortcuts ----------
+
+    void ShortcutKey_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not ShortcutRow row) return;
+        StopRecording();
+        _recording = row;
+        row.Error = null;
+        row.Recording = true;
+    }
+
+    void ShortcutClear_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not ShortcutRow row) return;
+        StopRecording();
+        SaveShortcut(row, null);
+    }
+
+    void StopRecording()
+    {
+        if (_recording != null) _recording.Recording = false;
+        _recording = null;
+    }
+
+    void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_recording == null) return;
+        e.Handled = true;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
+            return; // wait for the real key
+        var row = _recording;
+        if (key == Key.Escape && Keyboard.Modifiers == ModifierKeys.None) { StopRecording(); return; }
+        if (key is Key.Back or Key.Delete && Keyboard.Modifiers == ModifierKeys.None) { StopRecording(); SaveShortcut(row, null); return; }
+
+        var mods = Keyboard.Modifiers;
+        bool functionKey = key is >= Key.F1 and <= Key.F24;
+        if (mods == ModifierKeys.None && !functionKey)
+        {
+            row.Error = "Add Ctrl, Alt or Shift so this key still works normally when you type.";
+            return; // keep listening
+        }
+        StopRecording();
+        SaveShortcut(row, new Hotkey(mods, key));
+    }
+
+    void SaveShortcut(ShortcutRow row, Hotkey? key)
+    {
+        var error = _hotkeys.Set(row.Action.Id, key);
+        if (error != null)
+        {
+            row.Error = error;
+            // Keep the previous working shortcut if there was one.
+            if (row.Key is { } old && _hotkeys.Set(row.Action.Id, old) == null) return;
+            row.Key = null;
+            _settings.Shortcuts.Remove(row.Action.Id);
+            _settings.Save();
+            return;
+        }
+        row.Error = null;
+        row.Key = key;
+        if (key is { } k) _settings.Shortcuts[row.Action.Id] = k.ToString();
+        else _settings.Shortcuts.Remove(row.Action.Id);
+        _settings.Save();
+    }
+
+    void OnHotkey(string action)
+    {
+        switch (action)
+        {
+            case "toggle-mute":
+                Mic.Muted = !Mic.Muted;
+                Osd.Show(this, Mic.Muted ? "" : "", Mic.Muted ? "Mic muted" : "Mic on");
+                break;
+            case "push-to-talk":
+                Mic.Muted = false;
+                Osd.Show(this, "", "Talking…");
+                _pttTimer.Start(); // re-mutes when the key is released
+                break;
+            case "toggle-noise":
+                NoiseSwitch.IsChecked = NoiseSwitch.IsChecked != true;
+                Osd.Show(this, "", NoiseSwitch.IsChecked == true ? "Noise removal on" : "Noise removal off");
+                break;
+            case "boost-up":
+                BoostSlider.Value = Math.Min(BoostSlider.Maximum, BoostSlider.Value + 3);
+                Osd.Show(this, "", $"Mic boost {BoostValue.Text}");
+                break;
+            case "boost-down":
+                BoostSlider.Value = Math.Max(BoostSlider.Minimum, BoostSlider.Value - 3);
+                Osd.Show(this, "", $"Mic boost {BoostValue.Text}");
+                break;
+            case "next-tone":
+                var buttons = PresetPanel.Children.OfType<RadioButton>().ToList();
+                int i = buttons.FindIndex(b => b.IsChecked == true);
+                var next = buttons[(i + 1) % buttons.Count];
+                next.IsChecked = true;
+                Osd.Show(this, "", $"Voice tone: {next.Content}");
+                break;
+            case "show-app":
+                Show();
+                if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+                Activate();
+                break;
+        }
+    }
+
+    // ---------- Lifetime ----------
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        StopRecording();
         if (!ReallyClose) { e.Cancel = true; Hide(); } // keep running in the tray
         base.OnClosing(e);
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        _meterTimer.Stop(); _slowTimer.Stop();
+        _meterTimer.Stop(); _slowTimer.Stop(); _pttTimer.Stop();
+        _hotkeys.Dispose();
         Mic.Dispose(); Mixer.Dispose();
         base.OnClosed(e);
+    }
+}
+
+/// <summary>A small rounded popup near the bottom of the screen confirming what a shortcut did.</summary>
+public static class Osd
+{
+    static Window? _win;
+    static TextBlock? _icon, _text;
+    static readonly DispatcherTimer Hide = new() { Interval = TimeSpan.FromMilliseconds(1300) };
+
+    public static void Show(Window owner, string glyph, string message)
+    {
+        if (_win == null)
+        {
+            _icon = new TextBlock { Style = (Style)owner.FindResource("Icon"), FontSize = 18, Margin = new Thickness(0, 0, 12, 0) };
+            _text = new TextBlock { FontSize = 15, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center };
+            _win = new Window
+            {
+                WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent,
+                Topmost = true, ShowInTaskbar = false, ShowActivated = false, SizeToContent = SizeToContent.WidthAndHeight,
+                ResizeMode = ResizeMode.NoResize, Focusable = false,
+                Content = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(0xF2, 0x1B, 0x1B, 0x30)),
+                    BorderBrush = (Brush)owner.FindResource("Border"), BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(16), Padding = new Thickness(20, 14, 22, 14),
+                    Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { _icon, _text } },
+                },
+            };
+            Hide.Tick += (_, _) => { Hide.Stop(); _win.Hide(); };
+        }
+        _icon!.Text = glyph;
+        _text!.Text = message;
+        _win.Show();
+        _win.UpdateLayout();
+        var area = SystemParameters.WorkArea;
+        _win.Left = area.Left + (area.Width - _win.ActualWidth) / 2;
+        _win.Top = area.Bottom - _win.ActualHeight - 60;
+        Hide.Stop(); Hide.Start();
     }
 }
 

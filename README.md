@@ -33,6 +33,15 @@ audio APIs.
   ([RNNoise VST](https://github.com/werman/noise-suppression-for-voice)), 80 Hz low cut,
   voice tone presets (Flat, Warm, Clear, Broadcast, Radio)
 - **App mixer:** volume, mute and output device for each app playing sound
+- **Plugins:** add your own 64-bit VST2 effects to the mic chain, or **scan** the usual VST
+  folders (and any folder you pick) for them; turn on/off, reorder, remove. They're copied to
+  `C:\ProgramData\WaveFix\Plugins` so the audio engine (LOCAL SERVICE) can load them, and they
+  run on their default settings
+- **Shortcuts:** system-wide hotkeys (work in games): mute toggle, push to talk, noise removal
+  on/off, mic boost up/down, next voice tone, open WaveFix, with an on-screen confirmation
+- Friendly dark UI (palette and type from the UI/UX Pro Max "podcast / music streaming"
+  profile, [Plus Jakarta Sans](https://github.com/tokotype/PlusJakartaSans) under the OFL),
+  keyboard focus rings, screen-reader names, per-monitor DPI
 - Tray icon (left click opens, right click for mute and quit), optional start with Windows
 - Warns when Wave Link is running or when the effects aren't attached to the mic correctly
 

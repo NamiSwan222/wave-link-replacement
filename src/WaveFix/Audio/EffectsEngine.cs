@@ -119,6 +119,8 @@ public sealed class EffectsEngine
         if (s.LowCut) sb.AppendLine("Filter: ON HP Fc 80 Hz");
         if (s.NoiseRemoval && HasNoisePlugin) sb.AppendLine($"VSTPlugin: Library \"{NoisePluginPath}\"");
         foreach (var line in EqPresets.Lines(s.EqPreset)) sb.AppendLine(line);
+        foreach (var p in s.Plugins.Where(p => p.Enabled && File.Exists(p.Path)))
+            sb.AppendLine($"VSTPlugin: Library \"{p.Path}\"");
         if (Math.Abs(s.VoiceBoostDb) > 0.05) sb.AppendLine(FormattableString.Invariant($"Preamp: {s.VoiceBoostDb:0.0} dB"));
         return sb.ToString();
     }

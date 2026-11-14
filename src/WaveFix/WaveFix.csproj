@@ -9,8 +9,16 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyTitle>WaveFix</AssemblyTitle>
     <Product>WaveFix</Product>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WinForms analyzer: DPI is set in app.manifest on purpose (this is a WPF app) -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Plus Jakarta Sans (SIL Open Font License, see Fonts/OFL.txt) -->
+    <Resource Include="Fonts\*.ttf" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- WinForms is only used for the tray icon; keep its types out of global usings -->
