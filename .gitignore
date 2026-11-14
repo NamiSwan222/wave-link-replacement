@@ -11,3 +11,5 @@ obj/
 *.user
 .vs/
 backup/
+publish/
+installer/Output/

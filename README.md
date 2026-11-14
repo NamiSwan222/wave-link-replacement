@@ -45,6 +45,24 @@ audio APIs.
 - Tray icon (left click opens, right click for mute and quit), optional start with Windows
 - Warns when Wave Link is running or when the effects aren't attached to the mic correctly
 
+## Install
+
+Download `WaveFix-Setup-<version>.exe` from the
+[latest release](https://github.com/NamiSwan222/wave-link-replacement/releases/latest) and run it.
+It installs per-user (no admin) to `%LocalAppData%\Programs\WaveFix` and **updates itself**:
+it checks GitHub releases at startup and every 6 hours, verifies the installer against the
+release's `.sha256`, installs silently and restarts in the tray. Turn off **Auto-update** in the
+sidebar to get an "Update now" button instead.
+
+### Releasing (maintainers)
+
+Bump nothing by hand: push a tag and GitHub Actions builds the self-contained app, the
+Inno Setup installer and its checksum, and publishes the release.
+
+```bash
+git tag v0.3.1 && git push origin v0.3.1
+```
+
 ## Setup
 
 1. Install [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) 1.4.2. In Device
@@ -56,7 +74,7 @@ audio APIs.
    `tools\run-as-system.ps1` (pass `-Undo` to revert). Edit the endpoint GUID in
    `tools\set-mic-effect-slot.ps1` if your mic isn't the one it targets.
 4. Restart Windows Audio (or reboot).
-5. Build and run the app: `dotnet run -c Release --project src\WaveFix`
+5. Install WaveFix (above), or build it yourself: `dotnet run -c Release --project src\WaveFix`
    (needs the .NET 8 SDK). Close Wave Link.
 
 In Discord, OBS and other apps, select the physical mic (e.g. `Mic In (Elgato Wave:3)`),

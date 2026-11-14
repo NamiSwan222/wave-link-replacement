@@ -12,6 +12,8 @@ public sealed class AppSettings
     public string EqPreset { get; set; } = EqPresets.Flat;
     public double VoiceBoostDb { get; set; }
     public bool StartWithWindows { get; set; }
+    /// <summary>Download and install new GitHub releases automatically (checked every few hours).</summary>
+    public bool AutoUpdate { get; set; } = true;
     /// <summary>Action id → hotkey text, e.g. "toggle-mute" → "Ctrl+Alt+M".</summary>
     public Dictionary<string, string> Shortcuts { get; set; } = new();
     /// <summary>User VST plugins, in chain order.</summary>

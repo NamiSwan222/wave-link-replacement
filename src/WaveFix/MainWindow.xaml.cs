@@ -57,6 +57,8 @@ public partial class MainWindow : Window
         BoostSlider.Value = _settings.VoiceBoostDb;
         UpdateBoostLabel();
         StartupSwitch.IsChecked = StartupRegistration.IsEnabled;
+        AutoUpdateSwitch.IsChecked = _settings.AutoUpdate;
+        VersionText.Text = $"Version {Updater.Current} · Check for updates";
 
         Mic.DeviceChanged += () =>
         {
@@ -109,6 +111,10 @@ public partial class MainWindow : Window
         };
         _meterTimer.Start();
         _slowTimer.Start();
+
+        // Updates: first check shortly after start, then every 6 hours.
+        _updateTimer.Tick += (_, _) => { _updateTimer.Interval = TimeSpan.FromHours(6); _ = CheckForUpdates(userAsked: false); };
+        _updateTimer.Start();
 
         _loading = false;
         if (Mic.DeviceId != null) _settings.MicDeviceId = Mic.DeviceId;
@@ -227,6 +233,78 @@ public partial class MainWindow : Window
         StartupRegistration.Set(StartupSwitch.IsChecked == true);
         _settings.StartWithWindows = StartupSwitch.IsChecked == true;
         _settings.Save();
+    }
+
+    // ---------- Updates ----------
+
+    readonly DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromSeconds(8) };
+    Updater.Release? _pendingUpdate;
+    bool _updateBusy;
+
+    void AutoUpdate_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _settings.AutoUpdate = AutoUpdateSwitch.IsChecked == true;
+        _settings.Save();
+    }
+
+    void CheckUpdates_Click(object sender, RoutedEventArgs e) => _ = CheckForUpdates(userAsked: true);
+
+    async Task CheckForUpdates(bool userAsked)
+    {
+        if (_updateBusy) return;
+        _updateBusy = true;
+        if (userAsked) VersionText.Text = "Checking for updates…";
+        try
+        {
+            var r = await Updater.CheckAsync();
+            if (r == null)
+            {
+                if (userAsked) VersionText.Text = $"Version {Updater.Current} · You're up to date";
+                return;
+            }
+            _pendingUpdate = r;
+            VersionText.Text = $"Version {Updater.Current} · {r.Version} available";
+            if (_settings.AutoUpdate && !userAsked) { _updateBusy = false; await InstallUpdate(); return; }
+            ShowUpdateCard($"Version {r.Version} is ready. Your mic keeps working while it updates.", "Update now", enabled: true);
+        }
+        catch (Exception ex)
+        {
+            if (userAsked) VersionText.Text = "Couldn't check for updates. Are you online?";
+            Debug.WriteLine(ex);
+        }
+        finally { _updateBusy = false; }
+    }
+
+    void UpdateNow_Click(object sender, RoutedEventArgs e) => _ = InstallUpdate();
+
+    async Task InstallUpdate()
+    {
+        if (_pendingUpdate is not { } r || _updateBusy) return;
+        _updateBusy = true;
+        ShowUpdateCard($"Downloading version {r.Version}…", "Downloading…", enabled: false);
+        try
+        {
+            var progress = new Progress<double>(p => UpdateButtonText.Text = $"Downloading… {p:P0}");
+            var file = await Updater.DownloadAsync(r, progress);
+            ShowUpdateCard($"Installing version {r.Version}. WaveFix will be back in a few seconds.", "Installing…", enabled: false);
+            Updater.StartInstaller(file);
+            ((App)Application.Current).Quit();
+        }
+        catch (Exception ex)
+        {
+            ShowUpdateCard($"The update didn't install: {ex.Message}", "Try again", enabled: true);
+        }
+        finally { _updateBusy = false; }
+    }
+
+    void ShowUpdateCard(string text, string button, bool enabled)
+    {
+        UpdateCard.Visibility = Visibility.Visible;
+        UpdateTitle.Text = _pendingUpdate != null ? $"Update to {_pendingUpdate.Version}" : "Update available";
+        UpdateText.Text = text;
+        UpdateButtonText.Text = button;
+        UpdateButton.IsEnabled = enabled;
     }
 
     // ---------- Plugins ----------
@@ -469,7 +547,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        _meterTimer.Stop(); _slowTimer.Stop(); _pttTimer.Stop();
+        _meterTimer.Stop(); _slowTimer.Stop(); _pttTimer.Stop(); _updateTimer.Stop();
         _hotkeys.Dispose();
         Mic.Dispose(); Mixer.Dispose();
         base.OnClosed(e);

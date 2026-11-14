@@ -1,0 +1,62 @@
+name: Release
+
+# Push a tag like v0.3.1 to build the installer and publish a GitHub release.
+# WaveFix's auto-updater installs a release only if the installer matches its .sha256 file.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Read version from tag
+        shell: pwsh
+        run: |
+          $v = '${{ github.ref_name }}'.TrimStart('v')
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must look like v1.2.3, got ${{ github.ref_name }}" }
+          "VERSION=$v" >> $env:GITHUB_ENV
+
+      - name: Publish app (self-contained, single file)
+        run: >
+          dotnet publish src/WaveFix/WaveFix.csproj -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=none
+          -p:Version=${{ env.VERSION }} -o publish
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --no-progress -y }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q "/DAppVersion=$env:VERSION" /DPublishDir=..\publish installer\WaveFix.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $exe = "installer/Output/WaveFix-Setup-$env:VERSION.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  WaveFix-Setup-$env:VERSION.exe" | Out-File "$exe.sha256" -Encoding ascii -NoNewline
+          "SHA256: $hash"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WaveFix ${{ env.VERSION }}
+          body_path: installer/release-notes.md
+          files: |
+            installer/Output/WaveFix-Setup-${{ env.VERSION }}.exe
+            installer/Output/WaveFix-Setup-${{ env.VERSION }}.exe.sha256

@@ -1,5 +1,4 @@
 ﻿using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows;
 using Forms = System.Windows.Forms;
 
@@ -14,14 +13,25 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        bool updated = e.Args.Contains("--updated");
 
         _single = new Mutex(true, @"Local\WaveFix.SingleInstance", out bool first);
         if (!first)
         {
-            // Already running: tell it to show its window, then quit.
-            EventWaitHandle.OpenExisting(@"Local\WaveFix.Show").Set();
-            Shutdown();
-            return;
+            // After an update the old copy may still be closing: wait for it instead of quitting.
+            bool got = false;
+            if (updated)
+            {
+                try { got = _single.WaitOne(TimeSpan.FromSeconds(20)); }
+                catch (AbandonedMutexException) { got = true; }
+            }
+            if (!got)
+            {
+                // Already running: tell it to show its window, then quit.
+                try { EventWaitHandle.OpenExisting(@"Local\WaveFix.Show").Set(); } catch { }
+                Shutdown();
+                return;
+            }
         }
         var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\WaveFix.Show");
         ThreadPool.RegisterWaitForSingleObject(showSignal, (_, _) => Dispatcher.BeginInvoke(ShowWindow), null, -1, false);
@@ -29,7 +39,7 @@ public partial class App : Application
         var settings = AppSettings.Load();
         _window = new MainWindow(settings);
 
-        _tray = new Forms.NotifyIcon { Icon = MakeIcon(), Text = "WaveFix", Visible = true };
+        _tray = new Forms.NotifyIcon { Icon = LoadIcon(), Text = $"WaveFix {Updater.Current}", Visible = true };
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("Open WaveFix", null, (_, _) => ShowWindow());
         menu.Items.Add("Mute / unmute mic", null, (_, _) => _window.Mic.Muted = !_window.Mic.Muted);
@@ -38,7 +48,10 @@ public partial class App : Application
         _tray.ContextMenuStrip = menu;
         _tray.MouseClick += (_, me) => { if (me.Button == Forms.MouseButtons.Left) ShowWindow(); };
 
-        if (!e.Args.Contains("--tray")) _window.Show();
+        if (updated)
+            Osd.Show(_window, "", $"WaveFix updated to {Updater.Current}");
+        else if (!e.Args.Contains("--tray"))
+            _window.Show();
     }
 
     void ShowWindow()
@@ -49,31 +62,23 @@ public partial class App : Application
         _window.Activate();
     }
 
-    void Quit()
+    public void Quit()
     {
-        if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
+        if (_tray != null) { _tray.Visible = false; _tray.Dispose(); _tray = null; }
         if (_window != null) { _window.ReallyClose = true; _window.Close(); }
+        try { _single?.ReleaseMutex(); } catch { }
         Shutdown();
     }
 
-    /// <summary>Draws the tray icon (a green mic capsule) so no image file is needed.</summary>
-    static Icon MakeIcon()
+    /// <summary>The app icon embedded in the exe (Assets\WaveFix.ico), at tray size.</summary>
+    static Icon LoadIcon()
     {
-        using var bmp = new Bitmap(32, 32);
-        using (var g = Graphics.FromImage(bmp))
+        try
         {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Color.Transparent);
-            using var green = new SolidBrush(Color.FromArgb(0x3D, 0xDC, 0x97));
-            using var pen = new Pen(Color.FromArgb(0x3D, 0xDC, 0x97), 3);
-            using var body = new GraphicsPath();
-            body.AddArc(10, 2, 12, 12, 180, 180);
-            body.AddArc(10, 9, 12, 12, 0, 180);
-            body.CloseFigure();
-            g.FillPath(green, body);
-            g.DrawArc(pen, 6, 8, 20, 18, 0, 180);
-            g.DrawLine(pen, 16, 26, 16, 30);
+            var info = GetResourceStream(new Uri("pack://application:,,,/Assets/WaveFix.ico"));
+            if (info != null) return new Icon(info.Stream, Forms.SystemInformation.SmallIconSize);
         }
-        return Icon.FromHandle(bmp.GetHicon());
+        catch { }
+        return SystemIcons.Application;
     }
 }
