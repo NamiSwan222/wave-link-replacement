@@ -6,6 +6,7 @@
 //! WaveFix's own host reads in src/WaveFix/VstPlugin.cs.
 
 pub mod bridge;
+pub mod classic;
 pub mod dsp;
 pub mod params;
 pub mod voice;

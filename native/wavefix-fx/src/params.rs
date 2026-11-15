@@ -74,7 +74,22 @@ pub const MOD_RATE: usize = 42;
 pub const DRIVE_TYPE: usize = 43;
 pub const ECHO_STYLE: usize = 44;
 pub const RADIO: usize = 45;
-pub const COUNT: usize = 46;
+// Voice changer (classic.rs). When VmOn is set it replaces the effects above in the voice step.
+pub const VM_ON: usize = 46;
+pub const VM_PITCH: usize = 47;
+pub const VM_ROBOT: usize = 48;
+pub const VM_ROBOT_HZ: usize = 49;
+pub const VM_CHORUS: usize = 50;
+pub const VM_DRIVE: usize = 51;
+pub const VM_RADIO: usize = 52;
+pub const VM_ECHO: usize = 53;
+pub const VM_ECHO_TIME: usize = 54;
+pub const VM_ECHO_FB: usize = 55;
+pub const VM_VERB: usize = 56;
+pub const VM_ROOM: usize = 57;
+pub const VM_DAMP: usize = 58;
+pub const VM_GAIN: usize = 59;
+pub const COUNT: usize = 60;
 
 /// Names stay at 15 characters or fewer and without spaces (hosts give small name buffers).
 pub static PARAMS: [Param; COUNT] = [
@@ -136,6 +151,21 @@ pub static PARAMS: [Param; COUNT] = [
     lin("EchoStyle", 0.0, 3.0, 0.0, ""),
     // 0 off, 1 old phone, 2 walkie-talkie, 3 police radio, 4 AM radio.
     lin("Radio", 0.0, 4.0, 0.0, ""),
+    // Voice changer (classic.rs).
+    toggle("VmOn"),
+    lin("VmPitch", -12.0, 12.0, 0.0, "st"),
+    lin("VmRobot", 0.0, 1.0, 0.0, "%"),
+    lin("VmRobotHz", 20.0, 400.0, 90.0, "Hz"),
+    lin("VmChorus", 0.0, 1.0, 0.0, "%"),
+    lin("VmDrive", 0.0, 1.0, 0.0, "%"),
+    lin("VmRadio", 0.0, 1.0, 0.0, "%"),
+    lin("VmEcho", 0.0, 1.0, 0.0, "%"),
+    lin("VmEchoTime", 50.0, 1000.0, 300.0, "ms"),
+    lin("VmEchoFb", 0.0, 0.95, 0.5, "%"),
+    lin("VmVerb", 0.0, 1.0, 0.0, "%"),
+    lin("VmRoom", 0.0, 1.0, 0.5, "%"),
+    lin("VmDamp", 0.0, 1.0, 0.5, "%"),
+    lin("VmGain", -12.0, 12.0, 0.0, "dB"),
 ];
 
 impl Param {

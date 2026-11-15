@@ -2,6 +2,7 @@
 //! allocates, locks or panics: this code runs on the Windows audio engine's real-time thread.
 
 use crate::bridge;
+use crate::classic::{ClassicParams, ClassicVoice};
 use crate::params::{self as p, COUNT, PARAMS};
 use crate::voice::{Shape, SpectralVoice};
 use std::f32::consts::PI;
@@ -129,6 +130,9 @@ pub struct Dsp {
     comp_gr: f32,
     // Voice engine: pitch, formant, harmonics, octave, detune, breath, auto-tune, vocoder
     voice: SpectralVoice,
+    // Voice changer (classic.rs), used when VmOn is set
+    classic: ClassicVoice,
+    classic_on: bool,
     // Bitcrusher
     crush_count: f32,
     crush_val: f32,
@@ -178,6 +182,8 @@ impl Dsp {
             de_lp: [Biquad::default(); 2], de_hp: [Biquad::default(); 2], de_env: 0.0, de_gain: 1.0,
             comp_gr: 0.0,
             voice: SpectralVoice::new(),
+            classic: ClassicVoice::new(48_000.0),
+            classic_on: false,
             crush_count: 0.0, crush_val: 0.0,
             mod_delay: Delay::new((0.03 * MAX_RATE) as usize),
             mod_phase: 0.0, mod_last: 0.0, ph_x1: [0.0; 6], ph_y1: [0.0; 6],
@@ -215,6 +221,7 @@ impl Dsp {
             a.i = 0;
         }
         self.voice.set_sample_rate(self.sr);
+        self.classic.set_sample_rate(self.sr);
         self.last = None; // recompute filters
     }
 
@@ -225,6 +232,7 @@ impl Dsp {
         self.de_env = 0.0; self.de_gain = 1.0;
         self.comp_gr = 0.0;
         self.voice.reset();
+        self.classic.reset();
         self.crush_count = 0.0; self.crush_val = 0.0;
         self.mod_delay.clear(); self.mod_phase = 0.0; self.mod_last = 0.0;
         self.ph_x1 = [0.0; 6]; self.ph_y1 = [0.0; 6];
@@ -384,6 +392,30 @@ impl Dsp {
         if s.on(p::RVC_ON) {
             self.rvc.process(bridge, sr, buf, s.on(p::RVC_MUTE));
         }
+
+        // Voice changer (classic.rs): the app sends VmOn instead of VoiceOn for these voices.
+        let classic = s.on(p::VM_ON);
+        if classic {
+            // Fresh start each time it's switched on, so no old echo or reverb tail comes back.
+            if !self.classic_on { self.classic.reset(); }
+            let cp = ClassicParams {
+                pitch_semitones: s.v(p::VM_PITCH),
+                robot_mix: s.v(p::VM_ROBOT),
+                robot_freq: s.v(p::VM_ROBOT_HZ),
+                chorus_mix: s.v(p::VM_CHORUS),
+                drive: s.v(p::VM_DRIVE),
+                telephone: s.v(p::VM_RADIO),
+                echo_volume: s.v(p::VM_ECHO),
+                echo_time: s.v(p::VM_ECHO_TIME) * 0.001,
+                echo_feedback: s.v(p::VM_ECHO_FB),
+                reverb_wet: s.v(p::VM_VERB),
+                reverb_room: s.v(p::VM_ROOM),
+                reverb_damp: s.v(p::VM_DAMP),
+                gain_db: s.v(p::VM_GAIN),
+            };
+            self.classic.process(buf, &cp);
+        }
+        self.classic_on = classic;
 
         for x in buf.iter_mut() {
             let mut y = *x;

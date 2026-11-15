@@ -66,15 +66,14 @@ device still uses it). Your settings carry over.
   voice tone presets (Flat, Warm, Clear, Broadcast, Radio) and a Custom 5-band EQ
 - **Voice polish:** leveler (compressor), de-esser, background silencer (downward expander) and
   peak protection (limiter, the very last effect, after mic boost)
-- **Voice changer:** 28 voices in groups (size and age, characters, robots and music, radio and
-  phone, spaces) or a Custom mix. The voice engine (`native/wavefix-fx/src/voice.rs`) is an STFT
-  phase vocoder with peak-locked pitch shifting (Laroche & Dolson) and a cepstral spectral
-  envelope, so pitch and **formant** move separately; it also does harmonics tilt, an octave
-  layer, detune (inharmonic stretch), breath, auto-tune (YIN pitch detection, snap to the nearest
-  semitone) and a vocoder (chord carrier on the detected note), about 21 ms of delay. Time-domain
-  effects: ring mod, wobble, distortion (overdrive, fuzz, megaphone), bitcrusher, chorus/flanger/
-  phaser, radio (old phone, walkie-talkie with squelch, police radio, AM radio), echo (classic,
-  slapback, canyon, rhythm) and room
+- **Voice changer:** 13 voices in groups (pitch, robots and aliens, radio, spaces) or a Custom
+  mix, on the Voice Shift engine (`native/wavefix-fx/src/classic.rs`, parameters `Vm*`): a
+  two-head delay-line pitch shifter (40 ms sine-windowed grains), robot (ring modulator plus a
+  metallic comb at the same tone), two-tap chorus, tanh drive, radio band-pass, echo with
+  feedback, a Freeverb-style reverb (8 combs, 4 all-passes) and output gain into a soft limiter.
+  `cargo run --release --example render_voices -- in.wav outdir` renders a recording through
+  every voice. The older spectral voice engine (`voice.rs`: formant, auto-tune, vocoder) is still
+  in the plugin but no longer used by the app
 - **AI voices:** load [RVC](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI)
   voice models (`.pth`, or a `.zip` with one inside; v1/v2 at 32, 40 or 48 kHz) and talk in that
   voice, with a pitch control per voice. Everything runs locally with ONNX Runtime (DirectML on the

@@ -73,6 +73,15 @@ public partial class MainWindow
 
         // ---- Voice changer ----
         var v = _settings.Voice;
+        // Settings from the older voice changer: a voice it doesn't have becomes Deep, and a voice
+        // it does have gets this version's values (same name, different effects).
+        if (v.Version < 2 && v.Preset != VoicePreset.CustomId)
+        {
+            var now = VoicePreset.Find(v.Preset);
+            if (now == null) ChangeLog.Write($"Voice '{v.Preset}' isn't in the new voice changer: switched to Deep");
+            v.CopyFrom(now ?? VoicePreset.All[0]);
+        }
+        v.Version = 2;
         var custom = new VoicePreset(VoicePreset.CustomId, "Custom", "Your own mix");
         foreach (var (category, ids) in VoiceCategories)
         {
@@ -104,45 +113,28 @@ public partial class MainWindow
         void Slide(string label, string hint, double min, double max, double step, Func<VoiceSettings, double> get, Action<VoiceSettings, double> set,
             Func<double, string> format, bool resync = false)
         { AddVoiceSlider(vRow, vCol, label, hint, min, max, step, get, set, format, resync); Next(); }
-        void Pick(string label, string hint, string[] options, Func<VoiceSettings, int> get, Action<VoiceSettings, int> set)
-        { AddVoiceChoice(vRow, vCol, label, hint, options, get, set); Next(); }
-        static string Signed(double x, string neg, string pos) => Math.Abs(x) < 0.5 ? "Normal" : x < 0 ? $"{neg} {-x:0}%" : $"{pos} {x:0}%";
 
-        Header("Voice shape");
-        // Gender moves pitch and formant together (and shows where they are).
-        Slide("Gender", "Deeper and bigger, or lighter and smaller", -100, 100, 5,
-            s => Math.Clamp(s.Formant / 0.04, -100, 100), (s, x) => { s.Pitch = Math.Round(x * 0.06 * 2) / 2; s.Formant = Math.Round(x * 0.04 * 2) / 2; },
-            x => Signed(x, "Deeper", "Lighter"), resync: true);
-        Slide("Pitch", "Your note, in semitones (keeps your voice)", -12, 12, 0.5, s => s.Pitch, (s, x) => s.Pitch = x,
+        Header("Voice");
+        Slide("Pitch", "Higher or lower, in semitones", -12, 12, 0.5, s => s.Pitch, (s, x) => s.Pitch = x,
             x => x == 0 ? "Normal" : $"{x:+0.#;-0.#} st");
-        Slide("Formant", "Voice size without changing the note", -12, 12, 0.5, s => s.Formant, (s, x) => s.Formant = x,
-            x => x == 0 ? "Normal" : x < 0 ? $"Bigger {-x:0.#}" : $"Smaller {x:0.#}");
-        Slide("Harmonics", "Darker or brighter, buzzier tone", -100, 100, 5, s => s.Harmonics, (s, x) => s.Harmonics = x,
-            x => Signed(x, "Darker", "Brighter"));
-        Slide("Octave layer", "A second voice an octave below or above", -100, 100, 5, s => s.Octave, (s, x) => s.Octave = x,
-            x => Signed(x, "Below", "Above"));
-        Slide("Detune", "Pulls overtones off-key: metallic, alien", 0, 100, 1, s => s.Detune, (s, x) => s.Detune = x, Percent);
-        Slide("Breath", "Airy, whispery noise", 0, 100, 1, s => s.Breath, (s, x) => s.Breath = x, Percent);
-
-        Header("Pitch effects");
-        Slide("Auto-tune", "Snaps you to the nearest note (100% = robotic)", 0, 100, 1, s => s.Tune, (s, x) => s.Tune = x, Percent);
-        Slide("Vocoder", "Your words played by a synth chord", 0, 100, 1, s => s.Vocoder, (s, x) => s.Vocoder = x, Percent);
+        Slide("Volume", "Louder or quieter after the effects", -12, 12, 0.5, s => s.Gain, (s, x) => s.Gain = x,
+            x => x == 0 ? "Normal" : $"{x:+0.#;-0.#} dB");
 
         Header("Effects");
-        Slide("Ring mod", "Metallic, robotic buzz", 0, 100, 1, s => s.Robot, (s, x) => s.Robot = x, Percent);
-        Slide("Ring tone", "Low = growly robot, high = bell-like", 20, 400, 5, s => s.RobotFreq, (s, x) => s.RobotFreq = x, x => $"{x:0} Hz");
-        Slide("Distortion", "Crunch and grit", 0, 100, 1, s => s.Grit, (s, x) => s.Grit = x, Percent);
-        Pick("Distortion type", "Kind of crunch", new[] { "Overdrive", "Fuzz", "Megaphone" }, s => s.DriveType, (s, i) => s.DriveType = i);
-        Slide("Bitcrusher", "Retro, 8-bit sound", 0, 100, 1, s => s.Crush, (s, x) => s.Crush = x, Percent);
-        Slide("Wobble", "Wavy, unsteady pitch", 0, 100, 1, s => s.Wobble, (s, x) => s.Wobble = x, Percent);
-        Pick("Modulation", "Chorus, flanger or phaser", new[] { "Off", "Chorus", "Flanger", "Phaser" }, s => s.ModType, (s, i) => s.ModType = i);
-        Slide("Modulation amount", "How strong the swirl is", 0, 100, 1, s => s.ModMix, (s, x) => s.ModMix = x, Percent);
-        Slide("Modulation speed", "How fast it sweeps", 0.05, 8, 0.05, s => s.ModRate, (s, x) => s.ModRate = x, x => $"{x:0.##} Hz");
-        Pick("Radio", "Phone and radio sounds", new[] { "Off", "Old phone", "Walkie-talkie", "Police radio", "AM radio" }, s => s.Radio, (s, i) => s.Radio = i);
+        Slide("Robot", "Metallic, robotic buzz", 0, 100, 1, s => s.Robot, (s, x) => s.Robot = x, Percent);
+        Slide("Robot tone", "Low = growly robot, high = bell-like", 20, 400, 5, s => s.RobotFreq, (s, x) => s.RobotFreq = x, x => $"{x:0} Hz");
+        Slide("Chorus", "Two of you, slightly apart", 0, 100, 1, s => s.Chorus, (s, x) => s.Chorus = x, Percent);
+        Slide("Drive", "Crunch and grit", 0, 100, 1, s => s.Drive, (s, x) => s.Drive = x, Percent);
+        Slide("Radio", "Thin, phone-like sound", 0, 100, 1, s => s.RadioMix, (s, x) => s.RadioMix = x, Percent);
+
+        Header("Space");
         Slide("Echo", "Repeats after you talk", 0, 100, 1, s => s.Echo, (s, x) => s.Echo = x, Percent);
-        Pick("Echo style", "How it repeats", new[] { "Echo", "Slapback", "Canyon", "Rhythm" }, s => s.EchoStyle, (s, i) => s.EchoStyle = i);
-        Slide("Echo time", "Gap between repeats", 20, 1000, 10, s => s.EchoTime, (s, x) => s.EchoTime = x, x => $"{x:0} ms");
-        Slide("Room", "Reverb, like a big hall", 0, 100, 1, s => s.Room, (s, x) => s.Room = x, Percent);
+        Slide("Echo time", "Gap between repeats", 50, 1000, 10, s => s.EchoTime, (s, x) => s.EchoTime = x, x => $"{x:0} ms");
+        Slide("Echo repeats", "How long the echo keeps going", 0, 95, 1, s => s.EchoFeedback * 100, (s, x) => s.EchoFeedback = x / 100, x => $"{x:0}%");
+        Slide("Reverb", "Like a big hall", 0, 100, 1, s => s.Room, (s, x) => s.Room = x, Percent);
+        Slide("Room size", "Small room or cathedral", 0, 100, 1, s => s.RoomSize * 100, (s, x) => s.RoomSize = x / 100, x => $"{x:0}%");
+        Slide("Damping", "Brighter or darker reverb", 0, 100, 1, s => s.Damping * 100, (s, x) => s.Damping = x / 100,
+            x => x < 34 ? "Bright" : x < 67 ? "Medium" : "Dark");
 
         VoiceSwitch.IsChecked = v.Enabled;
         VoiceSwitch.IsEnabled = fx;
@@ -154,11 +146,10 @@ public partial class MainWindow
     /// <summary>Preset groups on the page (Custom last).</summary>
     static readonly (string Category, string[] Ids)[] VoiceCategories =
     {
-        ("Size and age", new[] { "deep", "giant", "swap-down", "swap-up", "kid", "chipmunk" }),
-        ("Characters", new[] { "monster", "whisper", "ghost", "alien", "bell", "twins" }),
-        ("Robots and music", new[] { "robot", "android", "autotune", "synth", "retro" }),
-        ("Radio and phone", new[] { "phone", "walkie", "police", "amradio", "megaphone" }),
-        ("Spaces and effects", new[] { "cave", "canyon", "underwater", "jet", "dream", "space", VoicePreset.CustomId }),
+        ("Pitch", new[] { "deep", "giant", "beast", "squeaky" }),
+        ("Robots and aliens", new[] { "bot3000", "android", "martian" }),
+        ("Radio", new[] { "walkie", "megaphone" }),
+        ("Spaces", new[] { "canyon", "cathedral", "phantom", "duo", VoicePreset.CustomId }),
     };
 
     readonly List<(ComboBox Box, Func<VoiceSettings, int> Get)> _voiceChoices = new();
@@ -282,6 +273,7 @@ public partial class MainWindow
     {
         var v = _settings.Voice;
         VoiceStateText.Text = !v.Enabled ? "Off: everyone hears your real voice."
+            : WaveFixEngine.NeedsUpdate ? "Needs the latest audio engine: click Update the audio engine on the Microphone page (Windows asks once). Until then you sound like yourself."
             : v.IsNeutral ? "On, but every slider is at normal, so you sound like yourself."
             : $"On: you sound like {VoiceLabel}.";
         VoiceResetButton.Visibility = v.Preset == VoicePreset.CustomId ? Visibility.Collapsed : Visibility.Visible;
