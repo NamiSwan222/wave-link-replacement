@@ -108,6 +108,9 @@ extern "C" fn host_callback(_e: *mut c_void, opcode: i32, _i: i32, _v: isize, pt
     }
 }
 
+/// Marks plugin output samples before processing (a NaN no plugin produces by accident).
+const UNWRITTEN: f32 = f32::from_bits(0x7FC0_5A5A);
+
 /// One loaded plugin instance covering `channels` consecutive channels.
 pub struct VstInstance {
     effect: *mut c_void,
@@ -137,13 +140,20 @@ impl VstInstance {
         }
         for i in 0..self.outputs {
             // Outputs go to spare buffers first: plugins may write outputs before reading inputs.
+            // They're marked first so an output the plugin never writes can be told apart.
+            self.spare_out[i][..n].fill(UNWRITTEN);
             self.out_ptrs[i] = self.spare_out[i].as_mut_ptr();
         }
         unsafe { (self.process)(self.effect, self.in_ptrs.as_ptr(), self.out_ptrs.as_mut_ptr(), n as i32); }
+        let written = |b: &[f32]| b[..n].iter().any(|s| s.to_bits() != UNWRITTEN.to_bits());
+        let first_written = self.outputs > 0 && written(&self.spare_out[0]);
         for (i, plane) in planes.iter_mut().enumerate() {
             // A mono plugin on this channel: output 0; extra stream channels keep plugin output i.
-            let src = &self.spare_out[i.min(self.outputs - 1)];
-            plane[..n].copy_from_slice(&src[..n]);
+            // Some "mono" plugins (RNNoise's rnnoise_mono) say they have two outputs but only fill
+            // the first: the other channel then gets the first output instead of silence.
+            let j = i.min(self.outputs - 1);
+            let src = if written(&self.spare_out[j]) { j } else if first_written { 0 } else { continue };
+            plane[..n].copy_from_slice(&self.spare_out[src][..n]);
         }
     }
 }

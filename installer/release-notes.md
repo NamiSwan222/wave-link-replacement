@@ -20,10 +20,11 @@ A Wave Link replacement whose mic effects run **inside Windows' own audio engine
 
 ## New in this version
 
-- **New voice changer.** The voice changer now runs on the Voice Shift engine: a fast pitch shifter, robot, chorus, drive, radio, echo and a big reverb, with 13 new voices from Deep and Giant to Bot 3000, Walkie, Cathedral and Phantom. The Custom sliders control those effects. Your voice changer setting carries over; a voice that no longer exists becomes Deep. **Needs the latest audio engine:** click **Update the audio engine** on the Microphone page once (Windows asks for permission).
+- **Standard noise removal now plays in both ears.** With Standard noise removal on, your voice only came out on the left side, so people with headphones heard you in one ear. The RNNoise plugin says it has two outputs but only fills the first; WaveFix now sends that to both sides, like Strong noise removal already did. The same applies to any of your own plugins that do this. **Needs the latest audio engine:** click **Update the audio engine** on the Microphone page once (Windows asks for permission).
 
 ## Earlier
 
+- **New voice changer.** The voice changer now runs on the Voice Shift engine: a fast pitch shifter, robot, chorus, drive, radio, echo and a big reverb, with 13 new voices from Deep and Giant to Bot 3000, Walkie, Cathedral and Phantom. The Custom sliders control those effects. Your voice changer setting carries over; a voice that no longer exists becomes Deep. **Needs the latest audio engine:** click **Update the audio engine** on the Microphone page once (Windows asks for permission).
 - **Set the AI voice delay yourself.** AI voices → Advanced → **Set the delay myself**: block size, context, crossfade and a safety margin. **Try the lowest delay** picks the shortest settings that held up in testing (about 0.12 s in all on a graphics card). If your PC can't keep up, WaveFix adds 10 ms at a time on its own.
 - **Much shorter automatic delay.** On a graphics card the AI voice now picks about 0.2 s instead of up to 1.2 s. WaveFix was measuring the graphics card while it was still warming up, and then trying other sizes that ran several times slower until a restart; it now reloads cleanly for each size and judges by the typical conversion.
 - **10 ms less delay for every AI voice:** part of the blend between blocks was reserved but never used.
